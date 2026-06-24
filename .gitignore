@@ -1,0 +1,15 @@
+node_modules
+/.log
+**/daemon
+public/*
+!/public/images/
+*.zip
+*.rar
+*.7z
+
+# Built executables
+*.exe
+**/build
+**/deployment
+**/public
+/src/generated/prisma

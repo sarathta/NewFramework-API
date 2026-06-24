@@ -1,0 +1,235 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model mst_currencies {
+  id                                                                     Int                   @id(map: "currencies_pkey") @default(autoincrement())
+  currency_code                                                          String                @unique(map: "currencies_currency_code_key") @db.VarChar(3)
+  currency_name                                                          String                @db.VarChar(100)
+  currency_symbol                                                        String                @db.VarChar(10)
+  decimal_places                                                         Int                   @default(2) @db.SmallInt
+  is_base_currency                                                       Boolean?              @default(false)
+  created_at                                                             DateTime?             @default(now()) @db.Timestamptz(6)
+  mst_currency_rates_mst_currency_rates_from_currency_idTomst_currencies mst_currency_rates[]  @relation("mst_currency_rates_from_currency_idTomst_currencies")
+  mst_currency_rates_mst_currency_rates_to_currency_idTomst_currencies   mst_currency_rates[]  @relation("mst_currency_rates_to_currency_idTomst_currencies")
+  mst_materials                                                          mst_materials[]
+  txn_purchase_orders                                                    txn_purchase_orders[]
+}
+
+model mst_currency_rates {
+  id                                                                 Int            @id(map: "currency_rates_pkey")
+  from_currency_id                                                   Int
+  to_currency_id                                                     Int
+  exchange_rate                                                      Decimal        @db.Decimal(18, 6)
+  mst_currencies_mst_currency_rates_from_currency_idTomst_currencies mst_currencies @relation("mst_currency_rates_from_currency_idTomst_currencies", fields: [from_currency_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_rate_from_currency")
+  mst_currencies_mst_currency_rates_to_currency_idTomst_currencies   mst_currencies @relation("mst_currency_rates_to_currency_idTomst_currencies", fields: [to_currency_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_rate_to_currency")
+}
+
+model mst_departments {
+  id            Int             @id(map: "departments_pkey") @default(autoincrement())
+  name          String          @unique(map: "departments_name_key") @db.VarChar(100)
+  is_active     Boolean?        @default(true)
+  mst_employees mst_employees[]
+  txn_indents   txn_indents[]
+}
+
+model mst_employees {
+  id                                                    Int              @id(map: "employees_pkey") @default(autoincrement())
+  employee_code                                         String           @unique(map: "employees_employee_code_key") @db.VarChar(20)
+  employee_name                                         String           @db.VarChar(100)
+  email                                                 String?          @unique(map: "employees_email_key") @db.VarChar(150)
+  phone                                                 String?          @db.VarChar(20)
+  designation                                           String?          @db.VarChar(100)
+  department_id                                         Int?
+  created_at                                            DateTime?        @default(now()) @db.Timestamptz(6)
+  username                                              String?          @unique(map: "employees_username_key") @db.VarChar(50)
+  password                                              String?          @db.VarChar(255)
+  role_id                                               Int?
+  mst_departments                                       mst_departments? @relation(fields: [department_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "employees_department_id_fkey")
+  mst_user_roles                                        mst_user_roles?  @relation(fields: [role_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_employee_role")
+  txn_indents_txn_indents_l1_approved_byTomst_employees txn_indents[]    @relation("txn_indents_l1_approved_byTomst_employees")
+  txn_indents_txn_indents_l2_approved_byTomst_employees txn_indents[]    @relation("txn_indents_l2_approved_byTomst_employees")
+  txn_indents_txn_indents_requested_byTomst_employees   txn_indents[]    @relation("txn_indents_requested_byTomst_employees")
+}
+
+model mst_indent_statuses {
+  id          Int           @id(map: "indent_statuses_pkey") @default(autoincrement())
+  code        String        @unique(map: "indent_statuses_code_key") @db.VarChar(30)
+  description String        @db.VarChar(50)
+  txn_indents txn_indents[]
+}
+
+model mst_inventory_control_thresholds {
+  id               Int           @id(map: "inventory_control_thresholds_pkey") @default(autoincrement())
+  material_code_id Int
+  minimum_level    Decimal?      @db.Decimal(5, 2)
+  maximum_level    Decimal?      @db.Decimal(5, 2)
+  threshold        Decimal?      @db.Decimal(5, 2)
+  mst_materials    mst_materials @relation(fields: [material_code_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_inventory_materials")
+}
+
+model mst_material_categories {
+  id            Int             @id(map: "material_categories_pkey") @default(autoincrement())
+  name          String          @unique(map: "material_categories_name_key") @db.VarChar(100)
+  created_at    DateTime?       @default(now()) @db.Timestamptz(6)
+  mst_materials mst_materials[]
+}
+
+model mst_materials {
+  id                               Int                                @id(map: "materials_pkey") @default(autoincrement())
+  code                             String                             @unique(map: "materials_code_key") @db.VarChar(50)
+  description                      String                             @db.VarChar(500)
+  category_id                      Int
+  bin_location                     String?                            @db.VarChar(50)
+  stock_qty                        Decimal?                           @default(0) @db.Decimal(14, 3)
+  created_at                       DateTime?                          @default(now()) @db.Timestamptz(6)
+  updated_at                       DateTime?                          @db.Timestamptz(6)
+  tax_code_id                      Int?
+  uom_id                           Int?
+  currency_id                      Int?
+  mst_inventory_control_thresholds mst_inventory_control_thresholds[]
+  mst_material_categories          mst_material_categories            @relation(fields: [category_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_material_category")
+  mst_currencies                   mst_currencies?                    @relation(fields: [currency_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_material_currency")
+  mst_tax_codes                    mst_tax_codes?                     @relation(fields: [tax_code_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_material_tax_code")
+  mst_uoms                         mst_uoms?                          @relation(fields: [uom_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_materials_uom")
+  mst_vendor_materials             mst_vendor_materials[]
+  txn_indent_items                 txn_indent_items[]
+  txn_purchase_order_items         txn_purchase_order_items[]
+
+  @@index([tax_code_id], map: "fki_fk_material_tax_code")
+}
+
+model mst_tax_codes {
+  id            Int             @id(map: "tax_codes_pkey") @default(autoincrement())
+  hsn_codes     String          @unique(map: "tax_codes_hsn_codes_key") @db.VarChar(100)
+  gst_rate      Decimal         @db.Decimal(5, 2)
+  mst_materials mst_materials[]
+}
+
+model mst_uoms {
+  id            Int             @id(map: "uoms_pkey") @default(autoincrement())
+  code          String          @unique(map: "uoms_code_key") @db.VarChar(20)
+  name          String          @db.VarChar(100)
+  mst_materials mst_materials[]
+}
+
+model mst_user_roles {
+  id            Int             @id(map: "user_roles_pkey") @default(autoincrement())
+  role_name     String          @unique(map: "user_roles_role_name_key") @db.VarChar(50)
+  description   String          @db.VarChar(100)
+  created_at    DateTime?       @default(now()) @db.Timestamptz(6)
+  mst_employees mst_employees[]
+}
+
+model mst_vendor_materials {
+  id                   Int           @id(map: "vendor_materials_pkey") @default(autoincrement())
+  vendor_id            Int
+  material_id          Int
+  vendor_material_code String?       @db.VarChar(100)
+  unit_price           Decimal?      @db.Decimal(14, 2)
+  lead_time_days       Int?
+  min_order_qty        Decimal?      @db.Decimal(14, 3)
+  is_preferred         Boolean?      @default(false)
+  created_at           DateTime?     @default(now()) @db.Timestamptz(6)
+  mst_materials        mst_materials @relation(fields: [material_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_vm_material")
+  mst_vendors          mst_vendors   @relation(fields: [vendor_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_vm_vendor")
+}
+
+model mst_vendors {
+  id                   Int                    @id(map: "vendors_pkey") @default(autoincrement())
+  company_name         String                 @db.VarChar(200)
+  company_address      String
+  contact_person       String                 @db.VarChar(100)
+  contact_phone        String                 @db.VarChar(20)
+  email                String                 @db.VarChar(150)
+  pan                  String                 @db.VarChar(10)
+  tan                  String?                @db.VarChar(10)
+  bank_name            String                 @db.VarChar(150)
+  bank_account_no      String                 @db.VarChar(50)
+  bank_branch_address  String?
+  ifsc_code            String                 @db.VarChar(11)
+  created_at           DateTime?              @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime?              @db.Timestamptz(6)
+  mst_vendor_materials mst_vendor_materials[]
+  txn_purchase_orders  txn_purchase_orders[]
+}
+
+model txn_indent_items {
+  id            Int           @id(map: "indent_items_pkey") @default(autoincrement())
+  indent_id     Int
+  material_id   Int
+  quantity      Decimal       @db.Decimal(14, 3)
+  unit_price    Decimal       @db.Decimal(14, 2)
+  material_code String        @db.VarChar(50)
+  description   String        @db.VarChar(500)
+  qty           Decimal       @db.Decimal(14, 3)
+  uom           String        @db.VarChar(20)
+  gst_rate      Decimal       @db.Decimal(5, 2)
+  txn_indents   txn_indents   @relation(fields: [indent_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_indent_item_indent")
+  mst_materials mst_materials @relation(fields: [material_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_indent_item_material")
+}
+
+model txn_indents {
+  id                                                      Int                   @id(map: "indents_pkey") @default(autoincrement())
+  indent_no                                               String                @unique(map: "indents_indent_no_key") @db.VarChar(30)
+  department_id                                           Int
+  requested_by                                            Int
+  total_value                                             Decimal               @db.Decimal(14, 2)
+  l1_approved                                             Boolean?              @default(false)
+  l2_approved                                             Boolean?              @default(false)
+  rejection_reason                                        String?               @db.VarChar(200)
+  created_at                                              DateTime?             @default(now()) @db.Timestamptz(6)
+  updated_at                                              DateTime?             @db.Timestamptz(6)
+  l1_approved_by                                          Int?
+  l1_approved_at                                          DateTime?             @db.Timestamptz(6)
+  l2_approved_by                                          Int?
+  l2_approved_at                                          DateTime?             @db.Timestamptz(6)
+  status_id                                               Int?
+  txn_indent_items                                        txn_indent_items[]
+  mst_departments                                         mst_departments       @relation(fields: [department_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_indent_department")
+  mst_indent_statuses                                     mst_indent_statuses?  @relation(fields: [status_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_indent_status")
+  mst_employees_txn_indents_l1_approved_byTomst_employees mst_employees?        @relation("txn_indents_l1_approved_byTomst_employees", fields: [l1_approved_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_indents_l1_approved_by")
+  mst_employees_txn_indents_l2_approved_byTomst_employees mst_employees?        @relation("txn_indents_l2_approved_byTomst_employees", fields: [l2_approved_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_indents_l2_approved_by")
+  mst_employees_txn_indents_requested_byTomst_employees   mst_employees         @relation("txn_indents_requested_byTomst_employees", fields: [requested_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_indents_requested_by")
+  txn_purchase_orders                                     txn_purchase_orders[]
+}
+
+model txn_purchase_order_items {
+  id                  Int                 @id(map: "purchase_order_items_pkey") @default(autoincrement())
+  po_id               Int
+  material_id         Int
+  material_code       String              @db.VarChar(50)
+  description         String              @db.VarChar(500)
+  qty                 Decimal             @db.Decimal(14, 3)
+  unit_price          Decimal             @db.Decimal(14, 2)
+  uom                 String              @db.VarChar(20)
+  gst_rate            Decimal             @db.Decimal(5, 2)
+  mst_materials       mst_materials       @relation(fields: [material_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "purchase_order_items_material_id_fkey")
+  txn_purchase_orders txn_purchase_orders @relation(fields: [po_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "purchase_order_items_po_id_fkey")
+}
+
+model txn_purchase_orders {
+  id                       Int                        @id(map: "purchase_orders_pkey") @default(autoincrement())
+  po_no                    String                     @unique(map: "purchase_orders_po_no_key") @db.VarChar(30)
+  indent_id                Int
+  vendor_id                Int
+  version                  Int?                       @default(1)
+  subtotal                 Decimal                    @db.Decimal(14, 2)
+  gst_amount               Decimal                    @db.Decimal(14, 2)
+  total_amount             Decimal                    @db.Decimal(14, 2)
+  issued_date              DateTime?                  @db.Timestamptz(6)
+  created_at               DateTime?                  @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime?                  @db.Timestamptz(6)
+  currency_id              Int?
+  exchange_rate            Decimal?                   @db.Decimal(18, 6)
+  base_currency_amount     Decimal?                   @db.Decimal(14, 2)
+  txn_purchase_order_items txn_purchase_order_items[]
+  mst_currencies           mst_currencies?            @relation(fields: [currency_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "purchase_orders_currency_id_fkey")
+  txn_indents              txn_indents                @relation(fields: [indent_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "purchase_orders_indent_id_fkey")
+  mst_vendors              mst_vendors                @relation(fields: [vendor_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "purchase_orders_vendor_id_fkey")
+}
