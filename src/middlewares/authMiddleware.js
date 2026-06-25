@@ -3,6 +3,7 @@ const {prisma} = require("../config/db");
 
 
 const authMiddleware = async (req,res,next) => {
+    console.log("inside authMiddleware");
     let token;
     if (req.headers.authorization && req.headers.authorization.startsWith("Bearer")) {
         token = req.headers.authorization.split(" ")[1];
@@ -16,7 +17,7 @@ const authMiddleware = async (req,res,next) => {
     try {
         //verify token and get user id
         const decoded = jwt.verify(token,process.env.JWT_SECRET);
-        const user = await prisma.users.findUnique({
+        const user = await prisma.mst_employees.findUnique({
             where: {id: decoded.userId}
         });
         if (!user) {

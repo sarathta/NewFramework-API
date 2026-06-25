@@ -20,10 +20,10 @@ async function register(name,email,password) {
     return {id: newUser.id, name: newUser.name, email: newUser.email};
 }
 
-async function login(email,password) {
+async function login(username,password) {
     // Check if user exists
-    const user = await prisma.users.findUnique({
-        where: {email: email}
+    const user = await prisma.mst_employees.findUnique({
+        where: {username: username}
     });
     if (!user) {
         throw new Error("Invalid credentials");
@@ -35,9 +35,14 @@ async function login(email,password) {
         throw new Error("Invalid credentials");
     }
     // Generate token
-    const token = generateToken(user.id);
+    const token = generateToken(user);
+
+    //find role name
+    const role = await prisma.mst_user_roles.findUnique({
+        where: {id: user.role_id}
+    });
     // Return user
-    return {user:{id: user.id, name: user.name, email: user.email}, token : token || null};
+    return {user:user.employee_name, role:role.role_name, token : token || null};
    
 }
 

@@ -3,29 +3,10 @@ const router = express.Router();
 const authService = require("../services/auth.service");
 
 
-const handleResponse = (res,status,message,data=null) => {
-    res.status(status).json({
-        status,
-        message,
-        data
-    });
-};
-
-router.post("/register",async (req,res,next) => {
-    const {name,email,password} = req.body;
-    try {
-        const newUser = await authService.register(name,email,password);
-        handleResponse(res,201,"User registered successfully",newUser);
-    }
-    catch (error) {
-        handleResponse(res,500,"Internal server error",error.message || "Something went wrong");
-    }
-});
-
 router.post("/login",async (req,res,next) => {
-    const {email,password} = req.body;
+    const {username,password} = req.body;
     try {
-        const user = await authService.login(email,password);
+        const user = await authService.login(username,password);
 
          res.cookie("jwt", user.token, {
             httpOnly: true,
@@ -34,20 +15,20 @@ router.post("/login",async (req,res,next) => {
             maxAge: 1000 * 60 * 60 * 24 * 7 // 7 days
         });
 
-        handleResponse(res,200,"User logged in successfully",user);
+        return res.status(200).json(user);
     }
     catch (error) {
-        handleResponse(res,500,"Internal server error",error.message || "Something went wrong");
+        return res.status(500).json({message: error.message || "Something went wrong"});
     }
 });
 
 router.post("/logout",async (req,res,next) => {
     try {
         const logout = await authService.logout(res);
-        handleResponse(res,200,"User logged out successfully",logout);
+        return res.status(200).json(logout);
     }
     catch (error) {
-        handleResponse(res,500,"Internal server error",error.message || "Something went wrong");
+        return res.status(500).json({message: error.message || "Something went wrong"});
     }
 });
 
