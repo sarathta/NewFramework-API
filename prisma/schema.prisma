@@ -233,8 +233,8 @@ model txn_stock_summary {
   stock_qty     Float?         @default(0) @db.Real
   tax_code_id   Int?
   uom_id        Int?
-  created_at    DateTime?      @default(now()) @db.Timetz(6)
-  updated_at    DateTime?      @db.Timetz(6)
+  created_at    DateTime       @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime?      @db.Timestamptz(6)
   mst_materials mst_materials? @relation(fields: [material_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_stock_materials")
   mst_tax_codes mst_tax_codes? @relation(fields: [tax_code_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_stock_tax_code")
   mst_uoms      mst_uoms?      @relation(fields: [uom_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_stock_uom")

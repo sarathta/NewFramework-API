@@ -21,6 +21,7 @@ async function createStock(data) {
 }
 
 async function updateStock(id, data) {
+    data.updated_at = new Date();
     return prisma.txn_stock_summary.update({
         where: { id : Number(id) },
         data,
