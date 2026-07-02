@@ -17,12 +17,11 @@ model mst_currencies {
   created_at                                                             DateTime?             @default(now()) @db.Timestamptz(6)
   mst_currency_rates_mst_currency_rates_from_currency_idTomst_currencies mst_currency_rates[]  @relation("mst_currency_rates_from_currency_idTomst_currencies")
   mst_currency_rates_mst_currency_rates_to_currency_idTomst_currencies   mst_currency_rates[]  @relation("mst_currency_rates_to_currency_idTomst_currencies")
-  mst_materials                                                          mst_materials[]
   txn_purchase_orders                                                    txn_purchase_orders[]
 }
 
 model mst_currency_rates {
-  id                                                                 Int            @id(map: "currency_rates_pkey")
+  id                                                                 Int            @id(map: "currency_rates_pkey") @default(autoincrement())
   from_currency_id                                                   Int
   to_currency_id                                                     Int
   exchange_rate                                                      Decimal        @db.Decimal(18, 6)
@@ -40,7 +39,6 @@ model mst_departments {
 
 model mst_employees {
   id                                                    Int              @id(map: "employees_pkey") @default(autoincrement())
-  employee_code                                         String           @unique(map: "employees_employee_code_key") @db.VarChar(20)
   employee_name                                         String           @db.VarChar(100)
   email                                                 String?          @unique(map: "employees_email_key") @db.VarChar(150)
   phone                                                 String?          @db.VarChar(20)
@@ -67,9 +65,9 @@ model mst_indent_statuses {
 model mst_inventory_control_thresholds {
   id               Int           @id(map: "inventory_control_thresholds_pkey") @default(autoincrement())
   material_code_id Int
-  minimum_level    Decimal?      @db.Decimal(5, 2)
-  maximum_level    Decimal?      @db.Decimal(5, 2)
-  threshold        Decimal?      @db.Decimal(5, 2)
+  minimum_level    Int?
+  maximum_level    Int?
+  threshold        Int?
   mst_materials    mst_materials @relation(fields: [material_code_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_inventory_materials")
 }
 
@@ -85,37 +83,27 @@ model mst_materials {
   code                             String                             @unique(map: "materials_code_key") @db.VarChar(50)
   description                      String                             @db.VarChar(500)
   category_id                      Int
-  bin_location                     String?                            @db.VarChar(50)
-  stock_qty                        Decimal?                           @default(0) @db.Decimal(14, 3)
   created_at                       DateTime?                          @default(now()) @db.Timestamptz(6)
-  updated_at                       DateTime?                          @db.Timestamptz(6)
-  tax_code_id                      Int?
-  uom_id                           Int?
-  currency_id                      Int?
   mst_inventory_control_thresholds mst_inventory_control_thresholds[]
   mst_material_categories          mst_material_categories            @relation(fields: [category_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_material_category")
-  mst_currencies                   mst_currencies?                    @relation(fields: [currency_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_material_currency")
-  mst_tax_codes                    mst_tax_codes?                     @relation(fields: [tax_code_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_material_tax_code")
-  mst_uoms                         mst_uoms?                          @relation(fields: [uom_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_materials_uom")
   mst_vendor_materials             mst_vendor_materials[]
   txn_indent_items                 txn_indent_items[]
   txn_purchase_order_items         txn_purchase_order_items[]
-
-  @@index([tax_code_id], map: "fki_fk_material_tax_code")
+  txn_stock_summary                txn_stock_summary[]
 }
 
 model mst_tax_codes {
-  id            Int             @id(map: "tax_codes_pkey") @default(autoincrement())
-  hsn_codes     String          @unique(map: "tax_codes_hsn_codes_key") @db.VarChar(100)
-  gst_rate      Decimal         @db.Decimal(5, 2)
-  mst_materials mst_materials[]
+  id                Int                 @id(map: "tax_codes_pkey") @default(autoincrement())
+  hsn_codes         String              @unique(map: "tax_codes_hsn_codes_key") @db.VarChar(100)
+  gst_rate          Decimal             @db.Decimal(5, 2)
+  txn_stock_summary txn_stock_summary[]
 }
 
 model mst_uoms {
-  id            Int             @id(map: "uoms_pkey") @default(autoincrement())
-  code          String          @unique(map: "uoms_code_key") @db.VarChar(20)
-  name          String          @db.VarChar(100)
-  mst_materials mst_materials[]
+  id                Int                 @id(map: "uoms_pkey") @default(autoincrement())
+  code              String              @unique(map: "uoms_code_key") @db.VarChar(20)
+  name              String              @db.VarChar(100)
+  txn_stock_summary txn_stock_summary[]
 }
 
 model mst_user_roles {
@@ -167,7 +155,6 @@ model txn_indent_items {
   unit_price    Decimal       @db.Decimal(14, 2)
   material_code String        @db.VarChar(50)
   description   String        @db.VarChar(500)
-  qty           Decimal       @db.Decimal(14, 3)
   uom           String        @db.VarChar(20)
   gst_rate      Decimal       @db.Decimal(5, 2)
   txn_indents   txn_indents   @relation(fields: [indent_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_indent_item_indent")
@@ -232,4 +219,23 @@ model txn_purchase_orders {
   mst_currencies           mst_currencies?            @relation(fields: [currency_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "purchase_orders_currency_id_fkey")
   txn_indents              txn_indents                @relation(fields: [indent_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "purchase_orders_indent_id_fkey")
   mst_vendors              mst_vendors                @relation(fields: [vendor_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "purchase_orders_vendor_id_fkey")
+}
+
+model test_abc {
+  id   Int     @id @default(autoincrement())
+  name String? @db.VarChar(100)
+}
+
+model txn_stock_summary {
+  id            Int            @id(map: "stock_summary_pkey") @default(autoincrement())
+  material_id   Int?
+  bin_location  String?        @db.VarChar(50)
+  stock_qty     Float?         @default(0) @db.Real
+  tax_code_id   Int?
+  uom_id        Int?
+  created_at    DateTime?      @default(now()) @db.Timetz(6)
+  updated_at    DateTime?      @db.Timetz(6)
+  mst_materials mst_materials? @relation(fields: [material_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_stock_materials")
+  mst_tax_codes mst_tax_codes? @relation(fields: [tax_code_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_stock_tax_code")
+  mst_uoms      mst_uoms?      @relation(fields: [uom_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_stock_uom")
 }

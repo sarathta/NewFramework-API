@@ -3,7 +3,6 @@ const { prisma } = require("../config/db");
 
 const employeeSelect = {
     id: true,
-    employee_code: true,
     employee_name: true,
     email: true,
     phone: true,
@@ -56,7 +55,6 @@ async function validateForeignKeys(department_id, role_id) {
 
 async function createEmployee(data) {
     const {
-        employee_code,
         employee_name,
         email,
         phone,
@@ -70,7 +68,6 @@ async function createEmployee(data) {
     await validateForeignKeys(department_id, role_id);
 
     const createData = {
-        employee_code,
         employee_name,
         email: email ?? null,
         phone: phone ?? null,
@@ -93,7 +90,6 @@ async function createEmployee(data) {
 
 async function updateEmployee(id, data) {
     const {
-        employee_code,
         employee_name,
         email,
         phone,
@@ -107,7 +103,6 @@ async function updateEmployee(id, data) {
     await validateForeignKeys(department_id, role_id);
 
     const updateData = {};
-    if (employee_code !== undefined) updateData.employee_code = employee_code;
     if (employee_name !== undefined) updateData.employee_name = employee_name;
     if (email !== undefined) updateData.email = email;
     if (phone !== undefined) updateData.phone = phone;

@@ -2,13 +2,17 @@ const express = require("express");
 const router = express.Router();
 const employeeService = require("../services/employee.service");
 
-router.post("/", async (req, res, next) => {
-    const { employee_code, employee_name } = req.body;
+const authMiddleware = require("../middlewares/authMiddleware");
 
-    if (!employee_code || !employee_name) {
+router.use(authMiddleware);
+
+router.post("/", async (req, res, next) => {
+    const {  employee_name } = req.body;
+
+    if (!employee_name) {
         return res.status(400).json({
             status: 400,
-            message: "employee_code and employee_name are required",
+            message: "employee_name is required",
             data: null,
         });
     }
@@ -31,7 +35,7 @@ router.post("/", async (req, res, next) => {
         if (error.code === "P2002") {
             return res.status(409).json({
                 status: 409,
-                message: "Employee code, email, or username already exists",
+                message: "email, or username already exists",
                 data: null,
             });
         }
