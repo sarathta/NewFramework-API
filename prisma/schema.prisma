@@ -59,6 +59,7 @@ model mst_indent_statuses {
   id          Int           @id(map: "indent_statuses_pkey") @default(autoincrement())
   code        String        @unique(map: "indent_statuses_code_key") @db.VarChar(30)
   description String        @db.VarChar(50)
+  codeId      Int
   txn_indents txn_indents[]
 }
 
@@ -177,6 +178,8 @@ model txn_indents {
   l2_approved_by                                          Int?
   l2_approved_at                                          DateTime?             @db.Timestamptz(6)
   status_id                                               Int?
+  l1_approval_required                                    Boolean?
+  l2_approval_required                                    Boolean?
   txn_indent_items                                        txn_indent_items[]
   mst_departments                                         mst_departments       @relation(fields: [department_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_indent_department")
   mst_indent_statuses                                     mst_indent_statuses?  @relation(fields: [status_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_indent_status")

@@ -24,7 +24,7 @@ async function login(username,password) {
         where: {id: user.role_id}
     });
     // Return user
-    return {user:user.employee_name, role:role.role_name, token : token || null};
+    return {user:user.employee_name, role:role.role_name, token : token || null, user_details:user};
    
 }
 

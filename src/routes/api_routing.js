@@ -10,6 +10,7 @@ const employeeController = require('../controllers/employeeController');
 const masterController = require('../controllers/masterController');
 const masterDataController = require('../controllers/masterDataController');
 const stockController = require('../controllers/stockController');
+const indentsController = require('../controllers/indentsController');
 
 // Mount all routes
 router.use('/auth', authController);
@@ -19,5 +20,6 @@ router.use('/users', employeeController);
 router.use('/masters', masterController);
 router.use('/master-data', masterDataController);
 router.use('/stocks', stockController);
+router.use('/indents', indentsController);
 
 module.exports = router;

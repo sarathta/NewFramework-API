@@ -30,7 +30,7 @@ async function updateStock(id, data) {
 
 async function deleteStock(id) {
     return prisma.txn_stock_summary.delete({
-        where: { id },
+        where: { id : Number(id) },
     });
 }
 
