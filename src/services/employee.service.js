@@ -9,9 +9,11 @@ const employeeSelect = {
     designation: true,
     department_id: true,
     role_id: true,
+    area_id: true,
     username: true,
     created_at: true,
     mst_departments: { select: { id: true, name: true } },
+    mst_area: { select: { id: true, name: true } },
     mst_user_roles: { select: { id: true, role_name: true } },
 };
 
@@ -25,7 +27,6 @@ async function getAllEmployees() {
 async function getEmployeeById(id) {
     return prisma.mst_employees.findUnique({
         where: { id: Number(id) },
-        select: employeeSelect,
     });
 }
 
@@ -61,11 +62,12 @@ async function createEmployee(data) {
         designation,
         department_id,
         role_id,
+        area_id,
         username,
         password,
     } = data;
 
-    await validateForeignKeys(department_id, role_id);
+    await validateForeignKeys(department_id, role_id ,area_id);
 
     const createData = {
         employee_name,
@@ -74,6 +76,7 @@ async function createEmployee(data) {
         designation: designation ?? null,
         department_id: department_id ?? null,
         role_id: role_id ?? null,
+        area_id: area_id ?? null,
         username: username ?? null,
     };
 
@@ -96,11 +99,12 @@ async function updateEmployee(id, data) {
         designation,
         department_id,
         role_id,
+        area_id,
         username,
         password,
     } = data;
 
-    await validateForeignKeys(department_id, role_id);
+    await validateForeignKeys(department_id, role_id, area_id);
 
     const updateData = {};
     if (employee_name !== undefined) updateData.employee_name = employee_name;
@@ -108,6 +112,7 @@ async function updateEmployee(id, data) {
     if (phone !== undefined) updateData.phone = phone;
     if (designation !== undefined) updateData.designation = designation;
     if (department_id !== undefined) updateData.department_id = department_id;
+    if (area_id !== undefined) updateData.area_id = area_id;
     if (role_id !== undefined) updateData.role_id = role_id;
     if (username !== undefined) updateData.username = username;
 

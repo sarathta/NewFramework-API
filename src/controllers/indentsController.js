@@ -10,6 +10,7 @@ router.post("/material-issue-request", async (req, res, next) => {
         const materialIssueRequest = await indentService.createMaterialIssueRequest(
             req.user.id,
             req.user.department_id,
+            req.user.area_id,
             req.body
         );
         return res.status(201).json({
@@ -35,6 +36,7 @@ router.post("/", async (req, res, next) => {
             req.user.id,
             req.user.role_id,
             req.user.department_id,
+            req.user.area_id,
             req.body
         );
         return res.status(201).json({
@@ -59,7 +61,8 @@ router.get("/", async (req, res, next) => {
         const indents = await indentService.getIndents(
             req.user.id,
             req.user.role_id,
-            req.user.department_id
+            req.user.department_id,
+            req.user.area_id
         );
         return res.status(200).json({
             status: 200,
@@ -77,7 +80,9 @@ router.put("/:id/approve", async (req, res, next) => {
             req.params.id,
             req.user.id,
             req.user.role_id,
-            req.user.department_id
+            req.user.department_id,
+            req.user.area_id,
+
         );
         return res.status(200).json({
             status: 200,
@@ -105,6 +110,7 @@ router.put("/:id/reject", async (req, res, next) => {
             req.user.id,
             req.user.role_id,
             req.user.department_id,
+            req.user.area_id,
             rejection_reason
         );
         return res.status(200).json({
@@ -130,6 +136,7 @@ router.put("/:id", async (req, res, next) => {
             req.params.id,
             req.user.id,
             req.user.department_id,
+            req.user.area_id,
             req.body
         );
         return res.status(200).json({

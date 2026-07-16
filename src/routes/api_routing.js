@@ -6,6 +6,7 @@ const router = express.Router();
 const authController = require('../controllers/authController');
 const userRoleController = require('../controllers/userRoleController');
 const departmentController = require('../controllers/departmentController');
+const areaController = require('../controllers/areaController');
 const employeeController = require('../controllers/employeeController');
 const masterController = require('../controllers/masterController');
 const masterDataController = require('../controllers/masterDataController');
@@ -17,6 +18,7 @@ const purchaseOrderController = require('../controllers/purchaseOrderController'
 // Mount all routes
 router.use('/auth', authController);
 router.use('/user-roles', userRoleController);
+router.use('/areas', areaController);
 router.use('/departments', departmentController);
 router.use('/users', employeeController);
 router.use('/masters', masterController);

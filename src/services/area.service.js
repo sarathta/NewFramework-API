@@ -1,35 +1,35 @@
 const { prisma } = require("../config/db");
 
-async function getAllDepartments() {
-    return prisma.mst_departments.findMany({
+async function getAllAreas() {
+    return prisma.mst_area.findMany({
         orderBy: { id: "asc" },
     });
 }
 
-async function getDepartmentById(id) {
-    return prisma.mst_departments.findUnique({
+async function getAreaById(id) {
+    return prisma.mst_area.findUnique({
         where: { id: Number(id) },
     });
 }
 
-async function createDepartment(name) {
-    return prisma.mst_departments.create({
+async function createArea(name) {
+    return prisma.mst_area.create({
         data: { name },
     });
 }
 
-async function updateDepartment(id, name) {
+async function updateArea(id, name) {
     const data = {};
     if (name !== undefined) data.name = name;
 
-    return prisma.mst_departments.update({
+    return prisma.mst_area.update({
         where: { id: Number(id) },
         data,
     });
 }
 
-async function deleteDepartment(id) {
-    const department = await prisma.mst_departments.findUnique({
+async function deleteArea(id) {
+    const area = await prisma.mst_area.findUnique({
         where: { id: Number(id) },
         include: {
             mst_employees: { select: { id: true } },
@@ -37,31 +37,31 @@ async function deleteDepartment(id) {
         },
     });
 
-    if (!department) {
+    if (!area) {
         return null;
     }
 
-    if (department.mst_employees.length > 0) {
+    if (area.mst_area.length > 0) {
         const error = new Error("Cannot delete department with assigned employees");
         error.statusCode = 409;
         throw error;
     }
 
-    if (department.txn_indents.length > 0) {
+    if (area.mst_area.length > 0) {
         const error = new Error("Cannot delete department with associated indents");
         error.statusCode = 409;
         throw error;
     }
 
-    return prisma.mst_departments.delete({
+    return prisma.mst_area.delete({
         where: { id: Number(id) },
     });
 }
 
 module.exports = {
-    getAllDepartments,
-    getDepartmentById,
-    createDepartment,
-    updateDepartment,
-    deleteDepartment,
+    getAllAreas,
+    getAreaById,
+    createArea,
+    updateArea,
+    deleteArea,
 };

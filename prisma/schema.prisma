@@ -32,7 +32,6 @@ model mst_currency_rates {
 model mst_departments {
   id            Int             @id(map: "departments_pkey") @default(autoincrement())
   name          String          @unique(map: "departments_name_key") @db.VarChar(100)
-  is_active     Boolean?        @default(true)
   mst_employees mst_employees[]
   txn_indents   txn_indents[]
 }
@@ -48,7 +47,9 @@ model mst_employees {
   username                                              String?          @unique(map: "employees_username_key") @db.VarChar(50)
   password                                              String?          @db.VarChar(255)
   role_id                                               Int?
+  area_id                                               Int?
   mst_departments                                       mst_departments? @relation(fields: [department_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "employees_department_id_fkey")
+  mst_area                                              mst_area?        @relation(fields: [area_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_employee_area")
   mst_user_roles                                        mst_user_roles?  @relation(fields: [role_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_employee_role")
   txn_indents_txn_indents_l1_approved_byTomst_employees txn_indents[]    @relation("txn_indents_l1_approved_byTomst_employees")
   txn_indents_txn_indents_l2_approved_byTomst_employees txn_indents[]    @relation("txn_indents_l2_approved_byTomst_employees")
@@ -180,7 +181,9 @@ model txn_indents {
   status_id                                               Int?
   l1_approval_required                                    Boolean?
   l2_approval_required                                    Boolean?
+  area_id                                                 Int
   txn_indent_items                                        txn_indent_items[]
+  mst_area                                                mst_area              @relation(fields: [area_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_indent_area")
   mst_departments                                         mst_departments       @relation(fields: [department_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_indent_department")
   mst_indent_statuses                                     mst_indent_statuses?  @relation(fields: [status_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_indent_status")
   mst_employees_txn_indents_l1_approved_byTomst_employees mst_employees?        @relation("txn_indents_l1_approved_byTomst_employees", fields: [l1_approved_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_indents_l1_approved_by")
@@ -224,11 +227,6 @@ model txn_purchase_orders {
   mst_vendors              mst_vendors                @relation(fields: [vendor_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "purchase_orders_vendor_id_fkey")
 }
 
-model test_abc {
-  id   Int     @id @default(autoincrement())
-  name String? @db.VarChar(100)
-}
-
 model txn_stock_summary {
   id            Int            @id(map: "stock_summary_pkey") @default(autoincrement())
   material_id   Int?
@@ -241,4 +239,20 @@ model txn_stock_summary {
   mst_materials mst_materials? @relation(fields: [material_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_stock_materials")
   mst_tax_codes mst_tax_codes? @relation(fields: [tax_code_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_stock_tax_code")
   mst_uoms      mst_uoms?      @relation(fields: [uom_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_stock_uom")
+}
+
+model mst_area {
+  id            Int             @id @default(autoincrement())
+  name          String          @db.VarChar(100)
+  mst_employees mst_employees[]
+  txn_indents   txn_indents[]
+}
+
+model mst_system_parameters {
+  id          Int      @id @default(autoincrement())
+  name        String   @db.VarChar(100)
+  description String   @db.VarChar(200)
+  value       Decimal? @db.Decimal(18, 4)
+  uom         String?  @db.VarChar(20)
+  type        Int?
 }

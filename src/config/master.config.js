@@ -216,6 +216,7 @@ const MASTER_CONFIGS = {
         idAutoIncrement: true,
         columns: [
             { field: "company_name", header: "Company Name" },
+            { field: "company_address", header: "Address" },
             { field: "contact_person", header: "Contact Person" },
             { field: "contact_phone", header: "Phone" },
             { field: "email", header: "Email" },
