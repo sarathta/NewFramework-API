@@ -9,6 +9,7 @@ const STATUS_REJECTED_CODE_ID = 6;
 const STATUS_L1_L2_APPROVED_CODE_ID = 7;
 
 const indentInclude = {
+    mst_area: { select: { id: true, name: true } },
     mst_departments: { select: { id: true, name: true } },
     mst_indent_statuses: {
         select: { id: true, code: true, codeId: true, description: true },
@@ -28,6 +29,7 @@ const indentInclude = {
 function formatIndent(indent) {
     const {
         mst_indent_statuses,
+        mst_area,
         mst_departments,
         txn_indent_items,
         mst_employees_txn_indents_requested_byTomst_employees,
@@ -38,6 +40,7 @@ function formatIndent(indent) {
 
     return {
         ...indentData,
+        area: mst_area,
         department: mst_departments,
         status: mst_indent_statuses
             ? {
@@ -54,10 +57,10 @@ function formatIndent(indent) {
     };
 }
 
-async function getIndents(userId, roleId, departmentId) {
+async function getIndents(userId, roleId, areaId, departmentId) {
     const conditions = [{ requested_by: userId }];
 
-    if (roleId === ROLE_L1_APPROVER && departmentId) {
+    if (roleId === ROLE_L1_APPROVER && areaId && departmentId) {
         conditions.push({
             l1_approval_required: true,
             mst_indent_statuses: {
@@ -65,11 +68,12 @@ async function getIndents(userId, roleId, departmentId) {
             },
             mst_employees_txn_indents_requested_byTomst_employees: {
                 department_id: departmentId,
+                area_id: areaId,
             },
         });
     }
 
-    if (roleId === ROLE_L2_APPROVER && departmentId) {
+    if (roleId === ROLE_L2_APPROVER && areaId && departmentId) {
         conditions.push({
             l2_approval_required: true,
             mst_indent_statuses: {
@@ -77,6 +81,7 @@ async function getIndents(userId, roleId, departmentId) {
             },
             mst_employees_txn_indents_requested_byTomst_employees: {
                 department_id: departmentId,
+                area_id: areaId,
             },
         });
     }
@@ -133,6 +138,18 @@ function validateItems(items) {
                 throw error;
             }
         }
+    }
+}
+
+async function validateArea(areaId) {
+    const area = await prisma.mst_area.findUnique({
+        where: { id: Number(areaId) },
+    });
+    
+    if (!area) {
+        const error = new Error("Area not found");
+        error.statusCode = 404;
+        throw error;
     }
 }
 
@@ -211,9 +228,16 @@ function mapIndentItems(items) {
     }));
 }
 
-async function validateCreateInput(userId, departmentId, data) {
+async function validateCreateInput(userId,areaId, departmentId, data) {
     const { items } = data;
+    const resolvedAreaId = data.area_id ?? areaId;
     const resolvedDepartmentId = data.department_id ?? departmentId;
+
+    if (!resolvedAreaId) {
+        const error = new Error("area_id is required");
+        error.statusCode = 400;
+        throw error;
+    }
 
     if (!resolvedDepartmentId) {
         const error = new Error("department_id is required");
@@ -222,15 +246,17 @@ async function validateCreateInput(userId, departmentId, data) {
     }
 
     validateItems(items);
+    await validateArea(resolvedAreaId);
     await validateDepartment(resolvedDepartmentId);
     await validateMaterials(items);
 
-    return { items, resolvedDepartmentId: Number(resolvedDepartmentId) };
+    return { items, resolvedAreaId: Number(resolvedAreaId), resolvedDepartmentId: Number(resolvedDepartmentId) };
 }
 
-async function createIndent(userId, roleId, departmentId, data) {
-    const { items, resolvedDepartmentId } = await validateCreateInput(
+async function createIndent(userId, roleId,areaId, departmentId, data) {
+    const { items, resolvedAreaId, resolvedDepartmentId } = await validateCreateInput(
         userId,
+        areaId,
         departmentId,
         data
     );
@@ -241,6 +267,7 @@ async function createIndent(userId, roleId, departmentId, data) {
     const indent = await prisma.txn_indents.create({
         data: {
             indent_no: await generateIndentNo(),
+            area_id: resolvedAreaId,
             department_id: resolvedDepartmentId,
             requested_by: userId,
             total_value: calculateTotalValue(items),
@@ -257,9 +284,10 @@ async function createIndent(userId, roleId, departmentId, data) {
     return formatIndent(indent);
 }
 
-async function createMaterialIssueRequest(userId, departmentId, data) {
-    const { items, resolvedDepartmentId } = await validateCreateInput(
+async function createMaterialIssueRequest(userId, areaId, departmentId, data) {
+    const { items, resolvedAreaId, resolvedDepartmentId } = await validateCreateInput(
         userId,
+        areaId,
         departmentId,
         data
     );
@@ -269,6 +297,7 @@ async function createMaterialIssueRequest(userId, departmentId, data) {
     const indent = await prisma.txn_indents.create({
         data: {
             indent_no: await generateIndentNo("MIR"),
+            area_id: resolvedAreaId,
             department_id: resolvedDepartmentId,
             requested_by: userId,
             total_value: calculateTotalValue(items),
@@ -318,11 +347,17 @@ function ensureNotApproved(indent) {
     }
 }
 
-async function updateIndent(id, userId, departmentId, data) {
+async function updateIndent(id, userId, areaId, departmentId, data) {
     const indent = await getOwnedIndent(id, userId);
     ensureNotApproved(indent);
 
     const { items } = data;
+
+    if (!areaId) {
+        const error = new Error("area_id is required");
+        error.statusCode = 400;
+        throw error;
+    }
 
     if (!departmentId) {
         const error = new Error("department_id is required");
@@ -331,12 +366,14 @@ async function updateIndent(id, userId, departmentId, data) {
     }
 
     validateItems(items);
+    await validateArea(areaId);
     await validateDepartment(departmentId);
     await validateMaterials(items);
 
     const updatedIndent = await prisma.txn_indents.update({
         where: { id: Number(id) },
         data: {
+            area_id: Number(areaId),
             department_id: Number(departmentId),
             total_value: calculateTotalValue(items),
             updated_at: new Date(),
@@ -401,21 +438,29 @@ function ensureApproverRole(roleId) {
     }
 }
 
-function ensureSameDepartment(indent, approverDepartmentId) {
+function ensureSameDepartment(indent,approverAreaId, approverDepartmentId) {
+    const requesterAreaId =
+        indent.mst_employees_txn_indents_requested_byTomst_employees?.area_id;
     const requesterDepartmentId =
         indent.mst_employees_txn_indents_requested_byTomst_employees?.department_id;
-
-    if (requesterDepartmentId !== approverDepartmentId) {
+    
+    if (requesterAreaId !== approverAreaId || requesterDepartmentId !== approverDepartmentId) {
         const error = new Error(
-            "You can only act on indents from your department"
+            "You can only act on indents from your area and department"
         );
         error.statusCode = 403;
         throw error;
     }
 }
 
-async function approveIndent(id, userId, roleId, departmentId) {
+async function approveIndent(id, userId, roleId, areaId, departmentId) {
     ensureApproverRole(roleId);
+
+    if (!areaId) {
+        const error = new Error("area_id is required");
+        error.statusCode = 400;
+        throw error;
+    }
 
     if (!departmentId) {
         const error = new Error("department_id is required");
@@ -424,7 +469,7 @@ async function approveIndent(id, userId, roleId, departmentId) {
     }
 
     const indent = await getIndentForApproval(id);
-    ensureSameDepartment(indent, departmentId);
+    ensureSameDepartment(indent, areaId, departmentId);
 
     if (indent.mst_indent_statuses?.codeId === STATUS_REJECTED_CODE_ID) {
         const error = new Error("Cannot approve a rejected indent");
@@ -502,8 +547,14 @@ async function approveIndent(id, userId, roleId, departmentId) {
     return formatIndent(updatedIndent);
 }
 
-async function rejectIndent(id, userId, roleId, departmentId, rejectionReason) {
+async function rejectIndent(id, userId, roleId, areaId, departmentId, rejectionReason) {
     ensureApproverRole(roleId);
+
+    if (!areaId) {
+        const error = new Error("area_id is required");
+        error.statusCode = 400;
+        throw error;
+    }
 
     if (!departmentId) {
         const error = new Error("department_id is required");
@@ -518,7 +569,7 @@ async function rejectIndent(id, userId, roleId, departmentId, rejectionReason) {
     }
 
     const indent = await getIndentForApproval(id);
-    ensureSameDepartment(indent, departmentId);
+    ensureSameDepartment(indent, areaId, departmentId);
 
     if (indent.mst_indent_statuses?.codeId === STATUS_REJECTED_CODE_ID) {
         const error = new Error("Indent is already rejected");

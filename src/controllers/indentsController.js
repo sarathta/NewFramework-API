@@ -9,6 +9,7 @@ router.post("/material-issue-request", async (req, res, next) => {
     try {
         const materialIssueRequest = await indentService.createMaterialIssueRequest(
             req.user.id,
+            req.user.area_id,
             req.user.department_id,
             req.body
         );
@@ -34,6 +35,7 @@ router.post("/", async (req, res, next) => {
         const indent = await indentService.createIndent(
             req.user.id,
             req.user.role_id,
+            req.user.area_id,
             req.user.department_id,
             req.body
         );
@@ -59,6 +61,7 @@ router.get("/", async (req, res, next) => {
         const indents = await indentService.getIndents(
             req.user.id,
             req.user.role_id,
+            req.user.area_id,
             req.user.department_id
         );
         return res.status(200).json({
@@ -77,6 +80,7 @@ router.put("/:id/approve", async (req, res, next) => {
             req.params.id,
             req.user.id,
             req.user.role_id,
+            req.user.area_id,
             req.user.department_id
         );
         return res.status(200).json({
@@ -104,6 +108,7 @@ router.put("/:id/reject", async (req, res, next) => {
             req.params.id,
             req.user.id,
             req.user.role_id,
+            req.user.area_id,
             req.user.department_id,
             rejection_reason
         );
@@ -129,6 +134,7 @@ router.put("/:id", async (req, res, next) => {
         const indent = await indentService.updateIndent(
             req.params.id,
             req.user.id,
+            req.user.area_id,
             req.user.department_id,
             req.body
         );
