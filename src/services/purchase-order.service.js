@@ -3,8 +3,8 @@ const { prisma } = require("../config/db");
 const STATUS_L1_L2_APPROVED_CODE_ID = 7;
 
 const approvedIndentInclude = {
-    mst_departments: { select: { id: true, name: true } },
     mst_area: { select: { id: true, name: true } },
+    mst_departments: { select: { id: true, name: true } },
     mst_indent_statuses: {
         select: { id: true, code: true, codeId: true, description: true },
     },
@@ -23,8 +23,8 @@ const approvedIndentInclude = {
 function formatApprovedIndent(indent) {
     const {
         mst_indent_statuses,
-        mst_departments,
         mst_area,
+        mst_departments,
         txn_indent_items,
         mst_employees_txn_indents_requested_byTomst_employees,
         mst_employees_txn_indents_l1_approved_byTomst_employees,
@@ -34,8 +34,8 @@ function formatApprovedIndent(indent) {
 
     return {
         ...indentData,
-        department: mst_departments,
         area: mst_area,
+        department: mst_departments,
         status: mst_indent_statuses
             ? {
                   id: mst_indent_statuses.id,

@@ -7,6 +7,7 @@ function formatMaterialIssueIndent(indent) {
     return {
         id: indent.id,
         indent_no: indent.indent_no,
+        area: indent.mst_area,
         department: indent.mst_departments,
         requested_by: indent.mst_employees_txn_indents_requested_byTomst_employees,
         created_at: indent.created_at,
@@ -40,6 +41,7 @@ async function getMaterialIssueIndents() {
             id: true,
             indent_no: true,
             created_at: true,
+            mst_area: { select: { id: true, name: true } },
             mst_departments: { select: { id: true, name: true } },
             mst_employees_txn_indents_requested_byTomst_employees: {
                 select: { id: true, employee_name: true, email: true },
@@ -127,6 +129,7 @@ async function issueMaterial(indentId) {
             id: true,
             indent_no: true,
             created_at: true,
+            mst_area: { select: { id: true, name: true } },
             mst_departments: { select: { id: true, name: true } },
             mst_employees_txn_indents_requested_byTomst_employees: {
                 select: { id: true, employee_name: true, email: true },

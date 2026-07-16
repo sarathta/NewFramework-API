@@ -117,17 +117,12 @@ model mst_user_roles {
 }
 
 model mst_vendor_materials {
-  id                   Int           @id(map: "vendor_materials_pkey") @default(autoincrement())
-  vendor_id            Int
-  material_id          Int
-  vendor_material_code String?       @db.VarChar(100)
-  unit_price           Decimal?      @db.Decimal(14, 2)
-  lead_time_days       Int?
-  min_order_qty        Decimal?      @db.Decimal(14, 3)
-  is_preferred         Boolean?      @default(false)
-  created_at           DateTime?     @default(now()) @db.Timestamptz(6)
-  mst_materials        mst_materials @relation(fields: [material_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_vm_material")
-  mst_vendors          mst_vendors   @relation(fields: [vendor_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_vm_vendor")
+  id            Int           @id(map: "vendor_materials_pkey") @default(autoincrement())
+  vendor_id     Int
+  material_id   Int
+  created_at    DateTime?     @default(now()) @db.Timestamptz(6)
+  mst_materials mst_materials @relation(fields: [material_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_vm_material")
+  mst_vendors   mst_vendors   @relation(fields: [vendor_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_vm_vendor")
 }
 
 model mst_vendors {
