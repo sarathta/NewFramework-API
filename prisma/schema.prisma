@@ -177,6 +177,7 @@ model txn_indents {
   l1_approval_required                                    Boolean?
   l2_approval_required                                    Boolean?
   area_id                                                 Int
+  is_material_issue                                       Boolean               @default(false)
   txn_indent_items                                        txn_indent_items[]
   mst_area                                                mst_area              @relation(fields: [area_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_indent_area")
   mst_departments                                         mst_departments       @relation(fields: [department_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_indent_department")
@@ -207,15 +208,24 @@ model txn_purchase_orders {
   indent_id                Int
   vendor_id                Int
   version                  Int?                       @default(1)
-  subtotal                 Decimal                    @db.Decimal(14, 2)
-  gst_amount               Decimal                    @db.Decimal(14, 2)
-  total_amount             Decimal                    @db.Decimal(14, 2)
+  subtotal                 Decimal                    @db.Decimal(14, 4)
+  gst_amount               Decimal?                   @db.Decimal(14, 4)
+  total_amount             Decimal                    @db.Decimal(14, 4)
   issued_date              DateTime?                  @db.Timestamptz(6)
   created_at               DateTime?                  @default(now()) @db.Timestamptz(6)
   updated_at               DateTime?                  @db.Timestamptz(6)
   currency_id              Int?
-  exchange_rate            Decimal?                   @db.Decimal(18, 6)
-  base_currency_amount     Decimal?                   @db.Decimal(14, 2)
+  exchange_rate            Decimal?                   @db.Decimal(18, 4)
+  base_currency_amount     Decimal?                   @db.Decimal(14, 4)
+  freight                  Decimal?                   @db.Decimal(14, 4)
+  packing                  Decimal?                   @db.Decimal(14, 4)
+  other_charges            Decimal?                   @db.Decimal(14, 4)
+  remarks                  String?                    @db.VarChar(200)
+  payment_terms            String?                    @db.VarChar(30)
+  shipping_address         String?                    @db.VarChar(200)
+  expected_delivery        DateTime?                  @db.Timestamptz(6)
+  type                     Int?
+  billing_address          String?                    @db.VarChar(200)
   txn_purchase_order_items txn_purchase_order_items[]
   mst_currencies           mst_currencies?            @relation(fields: [currency_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "purchase_orders_currency_id_fkey")
   txn_indents              txn_indents                @relation(fields: [indent_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "purchase_orders_indent_id_fkey")
