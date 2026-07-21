@@ -133,6 +133,37 @@ function validatePayload(body, config, isCreate) {
     }
 }
 
+async function generateMaterialCode(categoryId) {
+    const category = await prisma.mst_material_categories.findUnique({
+        where: { id: Number(categoryId) },
+        select: { code: true },
+    });
+
+    if (!category) {
+        const error = new Error("Material category not found");
+        error.statusCode = 400;
+        throw error;
+    }
+
+    const prefix = `${category.code}-`;
+    const existingMaterials = await prisma.mst_materials.findMany({
+        where: { category_id: Number(categoryId) },
+        select: { code: true },
+    });
+
+    let maxSequence = 0;
+    for (const material of existingMaterials) {
+        if (!material.code.startsWith(prefix)) continue;
+
+        const sequence = Number.parseInt(material.code.slice(prefix.length), 10);
+        if (!Number.isNaN(sequence) && sequence > maxSequence) {
+            maxSequence = sequence;
+        }
+    }
+
+    return `${prefix}${String(maxSequence + 1).padStart(4, "0")}`;
+}
+
 async function getMasterPage(groupKey, masterKey) {
     const { config } = resolveMaster(groupKey, masterKey);
     const include = buildInclude(config);
@@ -160,6 +191,10 @@ async function createMasterRecord(groupKey, masterKey, body) {
 
     validatePayload(body, config, true);
     const data = buildPayload(body, config, true);
+
+    if (masterKey === "mst_materials") {
+        data.code = await generateMaterialCode(data.category_id);
+    }
 
     const created = await prisma[masterKey].create({
         data,

@@ -1,7 +1,8 @@
 const { prisma } = require("../config/db");
-
-const STATUS_MATERIAL_ISSUE_CODE_ID = 1;
-const STATUS_MATERIAL_ISSUED_CODE_ID = 5;
+const {
+    STATUS_MATERIAL_ISSUE_CODE_ID,
+    STATUS_COMPLETED_CODE_ID,
+} = require("../config/status.config");
 
 function formatMaterialIssueIndent(indent) {
     return {
@@ -76,7 +77,7 @@ async function issueMaterial(indentId) {
     }
 
     const issuedStatusId = await getStatusIdByCodeId(
-        STATUS_MATERIAL_ISSUED_CODE_ID,
+        STATUS_COMPLETED_CODE_ID,
         "Material issued status not found"
     );
 

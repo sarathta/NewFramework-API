@@ -134,6 +134,7 @@ router.put("/:id", async (req, res, next) => {
         const indent = await indentService.updateIndent(
             req.params.id,
             req.user.id,
+            req.user.role_id,
             req.user.area_id,
             req.user.department_id,
             req.body
@@ -157,7 +158,11 @@ router.put("/:id", async (req, res, next) => {
 
 router.delete("/:id", async (req, res, next) => {
     try {
-        const indent = await indentService.deleteIndent(req.params.id, req.user.id);
+        const indent = await indentService.deleteIndent(
+            req.params.id,
+            req.user.id,
+            req.user.role_id
+        );
         return res.status(200).json({
             status: 200,
             message: "Indent deleted successfully",

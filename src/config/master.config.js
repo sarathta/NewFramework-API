@@ -36,7 +36,6 @@ const MASTER_CONFIGS = {
             { field: "category_label", header: "Category", type: "dropdown", displayField: "category_label" }
         ],
         formFields: [
-            { field: "code", label: "Code", type: "text", required: true, placeholder: "Enter material code" },
             { field: "description", label: "Description", type: "textarea", required: true, placeholder: "Enter description" },
             {
                 field: "category_id",
@@ -58,10 +57,12 @@ const MASTER_CONFIGS = {
         dataKey: "id",
         idAutoIncrement: true,
         columns: [
-            { field: "name", header: "Name" }
+            { field: "name", header: "Name" },
+            { field: "code", header: "Code" },
         ],
         formFields: [
             { field: "name", label: "Name", type: "text", required: true, placeholder: "Enter category name" },
+            { field: "code", label: "Code", type: "text", required: true, placeholder: "Enter category code" },
         ],
         optionsConfig: {},
     },

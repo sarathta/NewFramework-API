@@ -1,9 +1,10 @@
 const { prisma } = require("../config/db");
-
-const STATUS_L1_L2_APPROVED_CODE_ID = 7;
-const STATUS_PO_GENERATED_CODE_ID = 4;
-const PO_TYPE_DRAFT = 1;
-const PO_TYPE_ORDER = 2;
+const {
+    STATUS_L1_L2_APPROVED_CODE_ID,
+    STATUS_PO_GENERATED_CODE_ID,
+    PO_TYPE_DRAFT,
+    PO_TYPE_ORDER,
+} = require("../config/status.config");
 
 const approvedIndentInclude = {
     mst_area: { select: { id: true, name: true } },
