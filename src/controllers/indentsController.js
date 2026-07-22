@@ -5,6 +5,31 @@ const authMiddleware = require("../middlewares/authMiddleware");
 
 router.use(authMiddleware);
 
+router.post("/material-issue-request/draft", async (req, res, next) => {
+    try {
+        const materialIssueDraft = await indentService.createMaterialIssueDraft(
+            req.user.id,
+            req.user.area_id,
+            req.user.department_id,
+            req.body
+        );
+        return res.status(201).json({
+            status: 201,
+            message: "Material issue request saved as draft",
+            data: materialIssueDraft,
+        });
+    } catch (error) {
+        if (error.statusCode) {
+            return res.status(error.statusCode).json({
+                status: error.statusCode,
+                message: error.message,
+                data: null,
+            });
+        }
+        next(error);
+    }
+});
+
 router.post("/material-issue-request", async (req, res, next) => {
     try {
         const materialIssueRequest = await indentService.createMaterialIssueRequest(
@@ -17,6 +42,32 @@ router.post("/material-issue-request", async (req, res, next) => {
             status: 201,
             message: "Material issue request created successfully",
             data: materialIssueRequest,
+        });
+    } catch (error) {
+        if (error.statusCode) {
+            return res.status(error.statusCode).json({
+                status: error.statusCode,
+                message: error.message,
+                data: null,
+            });
+        }
+        next(error);
+    }
+});
+
+router.post("/draft", async (req, res, next) => {
+    try {
+        const indent = await indentService.createIndentDraft(
+            req.user.id,
+            req.user.role_id,
+            req.user.area_id,
+            req.user.department_id,
+            req.body
+        );
+        return res.status(201).json({
+            status: 201,
+            message: "Indent saved as draft",
+            data: indent,
         });
     } catch (error) {
         if (error.statusCode) {
@@ -52,6 +103,15 @@ router.post("/", async (req, res, next) => {
                 data: null,
             });
         }
+        next(error);
+    }
+});
+
+router.get("/material-issue-request/item-quantities", async (req, res, next) => {
+    try {
+        const itemQuantities = await indentService.getMaterialIssueItemQuantities();
+        return res.status(200).json(itemQuantities);
+    } catch (error) {
         next(error);
     }
 });

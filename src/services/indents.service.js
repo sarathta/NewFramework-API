@@ -9,6 +9,7 @@ const {
     STATUS_MATERIAL_ISSUE_CODE_ID,
     STATUS_L1_APPROVAL_PENDING_CODE_ID,
     STATUS_L1_APPROVED_CODE_ID,
+    STATUS_COMPLETED_CODE_ID,
     STATUS_REJECTED_CODE_ID,
     STATUS_L1_L2_APPROVED_CODE_ID,
 } = require("../config/status.config");
@@ -148,6 +149,54 @@ function validateItems(items) {
             }
         }
     }
+}
+
+async function validateDraftInput(userId, areaId, departmentId, data) {
+    const { items = [] } = data;
+    const resolvedAreaId = data.area_id ?? areaId;
+    const resolvedDepartmentId = data.department_id ?? departmentId;
+
+    if (!resolvedAreaId) {
+        const error = new Error("area_id is required");
+        error.statusCode = 400;
+        throw error;
+    }
+
+    if (!resolvedDepartmentId) {
+        const error = new Error("department_id is required");
+        error.statusCode = 400;
+        throw error;
+    }
+
+    await validateArea(resolvedAreaId);
+    await validateDepartment(resolvedDepartmentId);
+
+    const normalizedItems = Array.isArray(items) ? items : [];
+    const itemsWithMaterial = normalizedItems.filter((item) => item.material_id);
+
+    if (itemsWithMaterial.length > 0) {
+        await validateMaterials(itemsWithMaterial);
+    }
+
+    return {
+        items: normalizedItems,
+        resolvedAreaId: Number(resolvedAreaId),
+        resolvedDepartmentId: Number(resolvedDepartmentId),
+    };
+}
+
+function mapDraftIndentItems(items) {
+    return items
+        .filter((item) => item.material_id)
+        .map((item) => ({
+            material_id: Number(item.material_id),
+            quantity: Number(item.quantity ?? 0),
+            unit_price: Number(item.unit_price ?? 0),
+            material_code: item.material_code ?? "",
+            description: item.description ?? "",
+            uom: item.uom ?? "",
+            gst_rate: Number(item.gst_rate ?? 0),
+        }));
 }
 
 async function validateArea(areaId) {
@@ -304,6 +353,28 @@ async function validateCreateInput(userId,areaId, departmentId, data) {
     return { items, resolvedAreaId: Number(resolvedAreaId), resolvedDepartmentId: Number(resolvedDepartmentId) };
 }
 
+async function getOwnedDraftIndent(id, userId, roleId, isMaterialIssue) {
+    const indent = await getOwnedIndent(id, userId, roleId);
+
+    if (!indent.is_draft) {
+        const error = new Error("Only draft indents can be submitted");
+        error.statusCode = 409;
+        throw error;
+    }
+
+    if (indent.is_material_issue !== isMaterialIssue) {
+        const error = new Error(
+            isMaterialIssue
+                ? "Draft is not a material issue request"
+                : "Draft is a material issue request"
+        );
+        error.statusCode = 409;
+        throw error;
+    }
+
+    return indent;
+}
+
 async function createIndent(userId, roleId,areaId, departmentId, data) {
     const { items, resolvedAreaId, resolvedDepartmentId } = await validateCreateInput(
         userId,
@@ -330,16 +401,40 @@ async function createIndent(userId, roleId,areaId, departmentId, data) {
         statusId = await getL1ApprovalPendingStatusId();
     // }
 
+    const submitData = {
+        area_id: resolvedAreaId,
+        department_id: resolvedDepartmentId,
+        total_value: totalValue,
+        l1_approval_required: l1ApprovalRequired,
+        l2_approval_required: l2ApprovalRequired,
+        status_id: statusId,
+        is_draft: false,
+    };
+
+    if (data.id) {
+        await getOwnedDraftIndent(data.id, userId, roleId, false);
+
+        const indent = await prisma.txn_indents.update({
+            where: { id: Number(data.id) },
+            data: {
+                ...submitData,
+                updated_at: new Date(),
+                txn_indent_items: {
+                    deleteMany: {},
+                    create: mapIndentItems(items),
+                },
+            },
+            include: indentInclude,
+        });
+
+        return formatIndent(indent);
+    }
+
     const indent = await prisma.txn_indents.create({
         data: {
             indent_no: await generateIndentNo(),
-            area_id: resolvedAreaId,
-            department_id: resolvedDepartmentId,
             requested_by: userId,
-            total_value: totalValue,
-            l1_approval_required: l1ApprovalRequired,
-            l2_approval_required: l2ApprovalRequired,
-            status_id: statusId,
+            ...submitData,
             txn_indent_items: {
                 create: mapIndentItems(items),
             },
@@ -368,28 +463,111 @@ async function createMaterialIssueRequest(userId, areaId, departmentId, data) {
         ? await getL1ApprovalPendingStatusId()
         : await getMaterialIssueStatusId();
 
-    const indentData = {
-        indent_no: await generateIndentNo("MIR"),
+    const submitData = {
         area_id: resolvedAreaId,
         department_id: resolvedDepartmentId,
-        requested_by: userId,
         total_value: totalValue,
         l1_approval_required: l1ApprovalRequired,
         l2_approval_required: l2ApprovalRequired,
         is_material_issue: true,
+        is_draft: false,
         status_id: statusId,
-        txn_indent_items: {
-            create: mapIndentItems(items),
-        },
     };
 
     if (!requiresApproval) {
-        indentData.l1_approved = null;
-        indentData.l2_approved = null;
+        submitData.l1_approved = null;
+        submitData.l2_approved = null;
+    }
+
+    if (data.id) {
+        await getOwnedDraftIndent(data.id, userId, null, true);
+
+        const indent = await prisma.txn_indents.update({
+            where: { id: Number(data.id) },
+            data: {
+                ...submitData,
+                updated_at: new Date(),
+                txn_indent_items: {
+                    deleteMany: {},
+                    create: mapIndentItems(items),
+                },
+            },
+            include: indentInclude,
+        });
+
+        return formatIndent(indent);
     }
 
     const indent = await prisma.txn_indents.create({
-        data: indentData,
+        data: {
+            indent_no: await generateIndentNo("MIR"),
+            requested_by: userId,
+            ...submitData,
+            txn_indent_items: {
+                create: mapIndentItems(items),
+            },
+        },
+        include: indentInclude,
+    });
+
+    return formatIndent(indent);
+}
+
+async function createIndentDraft(userId, roleId, areaId, departmentId, data) {
+    const { items, resolvedAreaId, resolvedDepartmentId } = await validateDraftInput(
+        userId,
+        areaId,
+        departmentId,
+        data
+    );
+
+    const mappedItems = mapDraftIndentItems(items);
+    const totalValue = calculateTotalValue(mappedItems);
+
+    const indent = await prisma.txn_indents.create({
+        data: {
+            indent_no: await generateIndentNo(),
+            area_id: resolvedAreaId,
+            department_id: resolvedDepartmentId,
+            requested_by: userId,
+            total_value: totalValue,
+            l1_approval_required: false,
+            l2_approval_required: false,
+            status_id: null,
+            is_draft: true,
+            txn_indent_items: mappedItems.length > 0 ? { create: mappedItems } : undefined,
+        },
+        include: indentInclude,
+    });
+
+    return formatIndent(indent);
+}
+
+async function createMaterialIssueDraft(userId, areaId, departmentId, data) {
+    const { items, resolvedAreaId, resolvedDepartmentId } = await validateDraftInput(
+        userId,
+        areaId,
+        departmentId,
+        data
+    );
+
+    const mappedItems = mapDraftIndentItems(items);
+    const totalValue = calculateTotalValue(mappedItems);
+
+    const indent = await prisma.txn_indents.create({
+        data: {
+            indent_no: await generateIndentNo("MIR"),
+            area_id: resolvedAreaId,
+            department_id: resolvedDepartmentId,
+            requested_by: userId,
+            total_value: totalValue,
+            l1_approval_required: false,
+            l2_approval_required: false,
+            is_material_issue: true,
+            is_draft: true,
+            status_id: null,
+            txn_indent_items: mappedItems.length > 0 ? { create: mappedItems } : undefined,
+        },
         include: indentInclude,
     });
 
@@ -615,6 +793,12 @@ async function approveIndent(id, userId, roleId, areaId, departmentId) {
         throw error;
     }
 
+    if (indent.is_draft) {
+        const error = new Error("Cannot approve a draft indent");
+        error.statusCode = 409;
+        throw error;
+    }
+
     if (isAdministrator(roleId)) {
         return approveIndentAsAdmin(id, userId, indent);
     }
@@ -734,6 +918,12 @@ async function rejectIndent(id, userId, roleId, areaId, departmentId, rejectionR
         throw error;
     }
 
+    if (indent.is_draft) {
+        const error = new Error("Cannot reject a draft indent");
+        error.statusCode = 409;
+        throw error;
+    }
+
     if (indent.l1_approved && indent.l2_approved) {
         const error = new Error("Cannot reject a fully approved indent");
         error.statusCode = 409;
@@ -758,10 +948,67 @@ async function rejectIndent(id, userId, roleId, areaId, departmentId, rejectionR
     return formatIndent(updatedIndent);
 }
 
+async function getMaterialIssueItemQuantities() {
+    const grouped = await prisma.txn_indent_items.groupBy({
+        by: ["material_id"],
+        where: {
+            txn_indents: {
+                is_draft: false,
+                is_material_issue: true,
+                NOT: {
+                    mst_indent_statuses: {
+                        codeId: STATUS_COMPLETED_CODE_ID,
+                    },
+                },
+            },
+        },
+        _sum: {
+            quantity: true,
+        },
+    });
+
+    if (grouped.length === 0) {
+        return [];
+    }
+
+    const materialIds = grouped.map((group) => group.material_id);
+    const itemDetails = await prisma.txn_indent_items.findMany({
+        where: { material_id: { in: materialIds } },
+        distinct: ["material_id"],
+        select: {
+            material_id: true,
+            material_code: true,
+            description: true,
+            uom: true,
+        },
+    });
+
+    const detailsByMaterialId = Object.fromEntries(
+        itemDetails.map((item) => [item.material_id, item])
+    );
+
+    return grouped
+        .map((group) => {
+            const details = detailsByMaterialId[group.material_id];
+
+            return {
+                material_id: group.material_id,
+                material_code: details?.material_code ?? null,
+                description: details?.description ?? null,
+                uom: details?.uom ?? null,
+                total_quantity: Number(group._sum.quantity ?? 0),
+            };
+        })
+        .sort((a, b) => String(a.material_code).localeCompare(String(b.material_code)));
+}
+
 module.exports = {
     getIndents,
+    getMaterialIssueItemQuantities,
     createIndent,
+    createIndentDraft,
     createMaterialIssueRequest,
+    createMaterialIssueDraft,
     updateIndent,
     deleteIndent,
     approveIndent,

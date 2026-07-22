@@ -179,6 +179,7 @@ model txn_indents {
   l2_approval_required                                    Boolean?
   area_id                                                 Int
   is_material_issue                                       Boolean               @default(false)
+  is_draft                                                Boolean               @default(false)
   txn_indent_items                                        txn_indent_items[]
   mst_area                                                mst_area              @relation(fields: [area_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_indent_area")
   mst_departments                                         mst_departments       @relation(fields: [department_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_indent_department")
