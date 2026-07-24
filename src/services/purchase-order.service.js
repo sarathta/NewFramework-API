@@ -12,7 +12,7 @@ const approvedIndentInclude = {
     mst_indent_statuses: {
         select: { id: true, code: true, codeId: true, description: true },
     },
-    txn_indent_items: true,
+    txn_indent_items: {where: {is_rejected: false}},
     mst_employees_txn_indents_requested_byTomst_employees: {
         select: { id: true, employee_name: true, email: true },
     },

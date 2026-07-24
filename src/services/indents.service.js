@@ -32,7 +32,80 @@ const indentInclude = {
     },
 };
 
-function formatIndent(indent) {
+function serializeIndentItem(item) {
+    return {
+        ...item,
+        quantity: item.quantity?.toNumber?.() ?? Number(item.quantity),
+        unit_price: item.unit_price?.toNumber?.() ?? Number(item.unit_price),
+        gst_rate: item.gst_rate?.toNumber?.() ?? Number(item.gst_rate),
+    };
+}
+
+function getItemStatus(item, indent) {
+    if (item.is_rejected) {
+        return "rejected";
+    }
+
+    if (!indent.l1_approval_required && !indent.l2_approval_required) {
+        return "approved";
+    }
+
+    if (indent.l2_approval_required) {
+        if (item.is_l2_approved && indent.l2_approved) {
+            return "approved";
+        }
+
+        if (indent.l1_approved && !item.is_l1_approved) {
+            return "rejected";
+        }
+
+        return "pending";
+    }
+
+    if (indent.l1_approval_required) {
+        if (item.is_l1_approved && indent.l1_approved) {
+            return "approved";
+        }
+
+        if (indent.l1_approved && !item.is_l1_approved) {
+            return "rejected";
+        }
+
+        return "pending";
+    }
+
+    return "approved";
+}
+
+function shouldFilterItemsForRole(indent, userId, roleId) {
+    if (isAdministrator(roleId)) {
+        return false;
+    }
+
+    if (indent.requested_by === userId) {
+        return false;
+    }
+
+    return roleId === ROLE_L1_APPROVER || roleId === ROLE_L2_APPROVER;
+}
+
+function filterItemsForRole(items, indent, roleId) {
+    if (roleId === ROLE_L1_APPROVER) {
+        if (!indent.l1_approved) {
+            return items.filter((item) => getItemStatus(item, indent) === "pending");
+        }
+
+        return items.filter((item) => item.is_l1_approved || item.is_rejected);
+    }
+
+    if (roleId === ROLE_L2_APPROVER) {
+        return items.filter((item) => item.is_l1_approved && !item.is_rejected);
+    }
+
+    return items;
+}
+
+function formatIndent(indent, roleId = null, userId = null) {
     const {
         mst_indent_statuses,
         mst_area,
@@ -43,6 +116,12 @@ function formatIndent(indent) {
         mst_employees_txn_indents_l2_approved_byTomst_employees,
         ...indentData
     } = indent;
+
+    let items = txn_indent_items || [];
+
+    if (roleId != null && userId != null && shouldFilterItemsForRole(indent, userId, roleId)) {
+        items = filterItemsForRole(items, indent, roleId);
+    }
 
     return {
         ...indentData,
@@ -56,7 +135,10 @@ function formatIndent(indent) {
                   description: mst_indent_statuses.description,
               }
             : null,
-        items: txn_indent_items,
+        items: items.map((item) => ({
+            ...serializeIndentItem(item),
+            status: getItemStatus(item, indent),
+        })),
         requested_by_employee: mst_employees_txn_indents_requested_byTomst_employees,
         l1_approved_by_employee: mst_employees_txn_indents_l1_approved_byTomst_employees,
         l2_approved_by_employee: mst_employees_txn_indents_l2_approved_byTomst_employees,
@@ -69,7 +151,7 @@ async function getIndents(userId, roleId, areaId, departmentId) {
             include: indentInclude,
             orderBy: { created_at: "desc" },
         });
-        return indents.map(formatIndent);
+        return indents.map((indent) => formatIndent(indent, roleId, userId));
     }
 
     const conditions = [{ requested_by: userId }];
@@ -89,6 +171,7 @@ async function getIndents(userId, roleId, areaId, departmentId) {
 
     if (roleId === ROLE_L2_APPROVER && areaId && departmentId) {
         conditions.push({
+            l1_approved: true,
             l2_approval_required: true,
             mst_indent_statuses: {
                 codeId: { not: STATUS_MATERIAL_ISSUE_CODE_ID },
@@ -114,13 +197,39 @@ async function getIndents(userId, roleId, areaId, departmentId) {
         orderBy: { created_at: "desc" },
     });
 
-    return indents.map(formatIndent);
+    return indents.map((indent) => formatIndent(indent, roleId, userId));
 }
 
 async function generateIndentNo(prefix = "IND") {
-    const count = await prisma.txn_indents.count();
     const year = new Date().getFullYear();
-    return `${prefix}-${year}-${String(count + 1).padStart(5, "0")}`;
+    const indentNoPrefix = `${prefix}-${year}-`;
+
+    const latestIndent = await prisma.txn_indents.findFirst({
+        where: {
+            indent_no: {
+                startsWith: indentNoPrefix,
+            },
+        },
+        orderBy: {
+            indent_no: "desc",
+        },
+        select: {
+            indent_no: true,
+        },
+    });
+
+    let nextSequence = 1;
+
+    if (latestIndent) {
+        const sequencePart = latestIndent.indent_no.slice(indentNoPrefix.length);
+        const currentSequence = Number.parseInt(sequencePart, 10);
+
+        if (!Number.isNaN(currentSequence)) {
+            nextSequence = currentSequence + 1;
+        }
+    }
+
+    return `${indentNoPrefix}${String(nextSequence).padStart(5, "0")}`;
 }
 
 function validateItems(items) {
@@ -274,46 +383,107 @@ function calculateTotalValue(items) {
     );
 }
 
-async function getApprovalThreshold() {
+async function getSystemParameter(name, notFoundMessage) {
     const param = await prisma.mst_system_parameters.findFirst({
-        where: { name: "approvalThreshold" },
-        select: { value: true },
+        where: { name },
+        select: { value: true, datatype: true },
     });
 
-    if (!param?.value) {
-        const error = new Error("Approval threshold not found in system parameters");
-        error.statusCode = 404;
-        throw error;
+    if (param?.value === null || param?.value === undefined || param?.value === "") {
+        if (notFoundMessage) {
+            const error = new Error(notFoundMessage);
+            error.statusCode = 404;
+            throw error;
+        }
+        return null;
     }
 
-    return Number(param.value);
+    return param;
 }
 
-function determineIndentApprovalRequirements(totalValue, requiresApproval, approvalThreshold) {
-    // if (!requiresApproval) {
-    //     return { l1ApprovalRequired: false, l2ApprovalRequired: false };
-    // }
+function parseSystemParameterValue(param, parameterName) {
+    const { value, datatype } = param;
 
-    if (totalValue < approvalThreshold) {
-        return { l1ApprovalRequired: true, l2ApprovalRequired: false };
+    if (datatype === "number") {
+        const numericValue = Number(value);
+        if (Number.isNaN(numericValue)) {
+            const error = new Error(`${parameterName} value is not a valid number`);
+            error.statusCode = 500;
+            throw error;
+        }
+        return numericValue;
     }
 
-    return { l1ApprovalRequired: true, l2ApprovalRequired: true };
+    if (datatype === "boolean") {
+        return value === true || value === "true" || value === "1" || value === 1;
+    }
+
+    return value;
 }
 
-function determineMaterialIssueApprovalRequirements(l1Approval, l2Approval) {
-    const l1 = Boolean(l1Approval);
-    const l2 = Boolean(l2Approval);
+async function getSystemParameterValue(name, notFoundMessage) {
+    const param = await getSystemParameter(name, notFoundMessage);
+    if (!param) {
+        return null;
+    }
 
-    if (l2) {
+    return parseSystemParameterValue(param, name);
+}
+
+async function getApprovalThreshold() {
+    return getSystemParameterValue(
+        "approvalThreshold",
+        "Approval threshold not found in system parameters"
+    );
+}
+
+async function getMaterialIssueApprovalThreshold() {
+    return getSystemParameterValue(
+        "approvalThresholdForMaterialIssue",
+        "Material issue approval threshold not found in system parameters"
+    );
+}
+
+async function isIndentApprovalEnabled() {
+    const param = await getSystemParameter("enableIndentApproval");
+    if (!param) {
+        return false;
+    }
+
+    return parseSystemParameterValue(param, "enableIndentApproval");
+}
+
+async function isMaterialIssueApprovalEnabled() {
+    const param = await getSystemParameter("enableMaterialIssueApproval");
+    if (!param) {
+        return false;
+    }
+
+    return parseSystemParameterValue(param, "enableMaterialIssueApproval");
+}
+
+function determineIndentApprovalRequirements(items, approvalThreshold) {
+    const hasItemAtOrAboveThreshold = items.some(
+        (item) => Number(item.unit_price * item.quantity) >= approvalThreshold
+    );
+
+    if (hasItemAtOrAboveThreshold) {
         return { l1ApprovalRequired: true, l2ApprovalRequired: true };
     }
 
-    if (l1) {
-        return { l1ApprovalRequired: true, l2ApprovalRequired: false };
+    return { l1ApprovalRequired: true, l2ApprovalRequired: false };
+}
+
+function determineMaterialIssueApprovalRequirements(items, approvalThreshold) {
+    const hasItemAtOrAboveThreshold = items.some(
+        (item) => Number(item.quantity) >= approvalThreshold
+    );
+
+    if (hasItemAtOrAboveThreshold) {
+        return { l1ApprovalRequired: true, l2ApprovalRequired: true };
     }
 
-    return { l1ApprovalRequired: false, l2ApprovalRequired: false };
+    return { l1ApprovalRequired: true, l2ApprovalRequired: false };
 }
 
 function mapIndentItems(items) {
@@ -384,22 +554,27 @@ async function createIndent(userId, roleId,areaId, departmentId, data) {
     );
 
     const totalValue = calculateTotalValue(items);
-    // const requiresApproval = !isApprover(roleId);
     let l1ApprovalRequired = false;
     let l2ApprovalRequired = false;
     let statusId = null;
 
-    // if (requiresApproval) {
+    const indentApprovalEnabled = await isIndentApprovalEnabled();
+
+    if (indentApprovalEnabled) {
         const approvalThreshold = await getApprovalThreshold();
         const approvalRequirements = determineIndentApprovalRequirements(
-            totalValue,
-            // requiresApproval,
+            items,
             approvalThreshold
         );
         l1ApprovalRequired = approvalRequirements.l1ApprovalRequired;
         l2ApprovalRequired = approvalRequirements.l2ApprovalRequired;
         statusId = await getL1ApprovalPendingStatusId();
-    // }
+    } else {
+        statusId = await getStatusIdByCodeId(
+            STATUS_L1_L2_APPROVED_CODE_ID,
+            "Approved status not found"
+        );
+    }
 
     const submitData = {
         area_id: resolvedAreaId,
@@ -453,10 +628,22 @@ async function createMaterialIssueRequest(userId, areaId, departmentId, data) {
         data
     );
 
-    const { l1_approval, l2_approval } = data;
     const totalValue = calculateTotalValue(items);
-    const { l1ApprovalRequired, l2ApprovalRequired } =
-        determineMaterialIssueApprovalRequirements(l1_approval, l2_approval);
+    let l1ApprovalRequired = false;
+    let l2ApprovalRequired = false;
+
+    const materialIssueApprovalEnabled = await isMaterialIssueApprovalEnabled();
+
+    if (materialIssueApprovalEnabled) {
+        const approvalThreshold = await getMaterialIssueApprovalThreshold();
+        const approvalRequirements = determineMaterialIssueApprovalRequirements(
+            items,
+            approvalThreshold
+        );
+        l1ApprovalRequired = approvalRequirements.l1ApprovalRequired;
+        l2ApprovalRequired = approvalRequirements.l2ApprovalRequired;
+    }
+
     const requiresApproval = l1ApprovalRequired || l2ApprovalRequired;
 
     const statusId = requiresApproval
@@ -674,6 +861,7 @@ async function getIndentForApproval(id) {
         where: { id: Number(id) },
         include: {
             mst_indent_statuses: { select: { codeId: true } },
+            txn_indent_items: true,
             mst_employees_txn_indents_requested_byTomst_employees: {
                 select: { department_id: true, area_id: true },
             },
@@ -719,55 +907,171 @@ function ensureSameDepartment(indent, approverAreaId, approverDepartmentId, role
     }
 }
 
-async function approveIndentAsAdmin(id, userId, indent) {
-    const needsL1 = indent.l1_approval_required && !indent.l1_approved;
-    const needsL2 = indent.l2_approval_required && !indent.l2_approved;
-
-    if (!needsL1 && !needsL2) {
-        const error = new Error("No approval is pending for this indent");
-        error.statusCode = 409;
+function validateApprovalMaterialIds(materialIds, indentItems, approvalLevel) {
+    if (!Array.isArray(materialIds) || materialIds.length === 0) {
+        const error = new Error("material_ids must be a non-empty array");
+        error.statusCode = 400;
         throw error;
     }
 
-    const now = new Date();
-    const updateData = { updated_at: now };
+    const approvedMaterialIds = [...new Set(materialIds.map((id) => Number(id)))];
+    const indentMaterialIds = new Set(indentItems.map((item) => item.material_id));
 
-    if (needsL1) {
+    for (const materialId of approvedMaterialIds) {
+        if (!indentMaterialIds.has(materialId)) {
+            const error = new Error(`Material ${materialId} not found in indent items`);
+            error.statusCode = 400;
+            throw error;
+        }
+    }
+
+    if (approvalLevel === "l2") {
+        const l2EligibleIds = new Set(
+            indentItems
+                .filter((item) => item.is_l1_approved && !item.is_rejected)
+                .map((item) => item.material_id)
+        );
+
+        for (const materialId of approvedMaterialIds) {
+            if (!l2EligibleIds.has(materialId)) {
+                const error = new Error(
+                    `Material ${materialId} is not eligible for L2 approval`
+                );
+                error.statusCode = 400;
+                throw error;
+            }
+        }
+    }
+
+    return approvedMaterialIds;
+}
+
+async function updateIndentItemsForApproval(tx, indentItems, approvedMaterialIds, approvalLevel) {
+    const approvedSet = new Set(approvedMaterialIds);
+
+    for (const item of indentItems) {
+        if (approvalLevel === "l1") {
+            if (approvedSet.has(item.material_id)) {
+                await tx.txn_indent_items.update({
+                    where: { id: item.id },
+                    data: { is_l1_approved: true, is_rejected: false },
+                });
+            } else {
+                await tx.txn_indent_items.update({
+                    where: { id: item.id },
+                    data: { is_l1_approved: false, is_rejected: true },
+                });
+            }
+            continue;
+        }
+
+        if (!item.is_l1_approved || item.is_rejected) {
+            continue;
+        }
+
+        if (approvedSet.has(item.material_id)) {
+            await tx.txn_indent_items.update({
+                where: { id: item.id },
+                data: { is_l2_approved: true, is_rejected: false },
+            });
+        } else {
+            await tx.txn_indent_items.update({
+                where: { id: item.id },
+                data: { is_rejected: true },
+            });
+        }
+    }
+}
+
+async function resolveApprovalStatusId(indent, approvalLevel) {
+    if (approvalLevel === "l1") {
+        if (indent.is_material_issue && !indent.l2_approval_required) {
+            return getStatusIdByCodeId(
+                STATUS_MATERIAL_ISSUE_CODE_ID,
+                "Approval status not found"
+            );
+        }
+
+        if (!indent.is_material_issue && !indent.l2_approval_required) {
+            return getStatusIdByCodeId(
+                STATUS_L1_L2_APPROVED_CODE_ID,
+                "Approval status not found"
+            );
+        }
+
+        return getStatusIdByCodeId(STATUS_L1_APPROVED_CODE_ID, "Approval status not found");
+    }
+
+    const l2StatusCodeId = indent.is_material_issue
+        ? STATUS_MATERIAL_ISSUE_CODE_ID
+        : STATUS_L1_L2_APPROVED_CODE_ID;
+
+    return getStatusIdByCodeId(l2StatusCodeId, "Approval status not found");
+}
+
+async function applyIndentApproval(id, userId, indent, materialIds, approvalLevel) {
+    const approvedMaterialIds = validateApprovalMaterialIds(
+        materialIds,
+        indent.txn_indent_items,
+        approvalLevel
+    );
+
+    const now = new Date();
+    const statusId = await resolveApprovalStatusId(indent, approvalLevel);
+    const updateData = {
+        updated_at: now,
+        status_id: statusId,
+    };
+
+    if (approvalLevel === "l1") {
         updateData.l1_approved = true;
         updateData.l1_approved_by = userId;
         updateData.l1_approved_at = now;
-    }
-
-    if (needsL2) {
+    } else {
         updateData.l2_approved = true;
         updateData.l2_approved_by = userId;
         updateData.l2_approved_at = now;
     }
 
-    let statusCodeId;
-    if (needsL2 || (needsL1 && indent.l2_approval_required)) {
-        statusCodeId = indent.is_material_issue
-            ? STATUS_MATERIAL_ISSUE_CODE_ID
-            : STATUS_L1_L2_APPROVED_CODE_ID;
-    } else if (indent.is_material_issue) {
-        statusCodeId = STATUS_MATERIAL_ISSUE_CODE_ID;
-    } else {
-        statusCodeId = STATUS_L1_L2_APPROVED_CODE_ID;
-    }
+    await prisma.$transaction(async (tx) => {
+        await updateIndentItemsForApproval(
+            tx,
+            indent.txn_indent_items,
+            approvedMaterialIds,
+            approvalLevel
+        );
 
-    const statusId = await getStatusIdByCodeId(statusCodeId, "Approval status not found");
-    updateData.status_id = statusId;
+        await tx.txn_indents.update({
+            where: { id: Number(id) },
+            data: updateData,
+        });
+    });
 
-    const updatedIndent = await prisma.txn_indents.update({
+    const updatedIndent = await prisma.txn_indents.findUnique({
         where: { id: Number(id) },
-        data: updateData,
         include: indentInclude,
     });
 
     return formatIndent(updatedIndent);
 }
 
-async function approveIndent(id, userId, roleId, areaId, departmentId) {
+async function approveIndentAsAdmin(id, userId, indent, materialIds) {
+    let approvalLevel;
+
+    if (indent.l1_approval_required && !indent.l1_approved) {
+        approvalLevel = "l1";
+    } else if (indent.l2_approval_required && !indent.l2_approved) {
+        approvalLevel = "l2";
+    } else {
+        const error = new Error("No approval is pending for this indent");
+        error.statusCode = 409;
+        throw error;
+    }
+
+    return applyIndentApproval(id, userId, indent, materialIds, approvalLevel);
+}
+
+async function approveIndent(id, userId, roleId, areaId, departmentId, materialIds) {
     ensureApproverRole(roleId);
 
     if (!isAdministrator(roleId)) {
@@ -800,11 +1104,10 @@ async function approveIndent(id, userId, roleId, areaId, departmentId) {
     }
 
     if (isAdministrator(roleId)) {
-        return approveIndentAsAdmin(id, userId, indent);
+        return approveIndentAsAdmin(id, userId, indent, materialIds);
     }
 
-    const now = new Date();
-    let updateData = { updated_at: now };
+    let approvalLevel;
 
     if (roleId === ROLE_L1_APPROVER) {
         if (indent.l1_approved) {
@@ -819,27 +1122,7 @@ async function approveIndent(id, userId, roleId, areaId, departmentId) {
             throw error;
         }
 
-        let l1StatusCodeId;
-        if (indent.is_material_issue && !indent.l2_approval_required) {
-            l1StatusCodeId = STATUS_MATERIAL_ISSUE_CODE_ID;
-        } else if (!indent.is_material_issue && !indent.l2_approval_required) {
-            l1StatusCodeId = STATUS_L1_L2_APPROVED_CODE_ID;
-        } else {
-            l1StatusCodeId = STATUS_L1_APPROVED_CODE_ID;
-        }
-
-        const statusId = await getStatusIdByCodeId(
-            l1StatusCodeId,
-            "Approval status not found"
-        );
-
-        updateData = {
-            ...updateData,
-            l1_approved: true,
-            l1_approved_by: userId,
-            l1_approved_at: now,
-            status_id: statusId,
-        };
+        approvalLevel = "l1";
     } else if (roleId === ROLE_L2_APPROVER) {
         if (!indent.l1_approved) {
             const error = new Error("L1 approval is required before L2 approval");
@@ -859,31 +1142,14 @@ async function approveIndent(id, userId, roleId, areaId, departmentId) {
             throw error;
         }
 
-        const l2StatusCodeId = indent.is_material_issue
-            ? STATUS_MATERIAL_ISSUE_CODE_ID
-            : STATUS_L1_L2_APPROVED_CODE_ID;
-
-        const statusId = await getStatusIdByCodeId(
-            l2StatusCodeId,
-            "Approval status not found"
-        );
-
-        updateData = {
-            ...updateData,
-            l2_approved: true,
-            l2_approved_by: userId,
-            l2_approved_at: now,
-            status_id: statusId,
-        };
+        approvalLevel = "l2";
+    } else {
+        const error = new Error("Only approvers can perform this action");
+        error.statusCode = 403;
+        throw error;
     }
 
-    const updatedIndent = await prisma.txn_indents.update({
-        where: { id: Number(id) },
-        data: updateData,
-        include: indentInclude,
-    });
-
-    return formatIndent(updatedIndent);
+    return applyIndentApproval(id, userId, indent, materialIds, approvalLevel);
 }
 
 async function rejectIndent(id, userId, roleId, areaId, departmentId, rejectionReason) {
@@ -935,13 +1201,28 @@ async function rejectIndent(id, userId, roleId, areaId, departmentId, rejectionR
         "Rejected status not found"
     );
 
-    const updatedIndent = await prisma.txn_indents.update({
+    await prisma.$transaction(async (tx) => {
+        await tx.txn_indent_items.updateMany({
+            where: { indent_id: Number(id) },
+            data: {
+                is_rejected: true,
+                is_l1_approved: false,
+                is_l2_approved: false,
+            },
+        });
+
+        await tx.txn_indents.update({
+            where: { id: Number(id) },
+            data: {
+                status_id: rejectedStatusId,
+                rejection_reason: rejectionReason,
+                updated_at: new Date(),
+            },
+        });
+    });
+
+    const updatedIndent = await prisma.txn_indents.findUnique({
         where: { id: Number(id) },
-        data: {
-            status_id: rejectedStatusId,
-            rejection_reason: rejectionReason,
-            updated_at: new Date(),
-        },
         include: indentInclude,
     });
 
@@ -952,6 +1233,7 @@ async function getMaterialIssueItemQuantities() {
     const grouped = await prisma.txn_indent_items.groupBy({
         by: ["material_id"],
         where: {
+            is_rejected: false,
             txn_indents: {
                 is_draft: false,
                 is_material_issue: true,
@@ -973,7 +1255,7 @@ async function getMaterialIssueItemQuantities() {
 
     const materialIds = grouped.map((group) => group.material_id);
     const itemDetails = await prisma.txn_indent_items.findMany({
-        where: { material_id: { in: materialIds } },
+        where: { material_id: { in: materialIds }},
         distinct: ["material_id"],
         select: {
             material_id: true,

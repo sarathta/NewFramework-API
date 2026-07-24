@@ -3,7 +3,6 @@ const {prisma} = require("../config/db");
 
 
 const authMiddleware = async (req,res,next) => {
-    console.log("inside authMiddleware");
     let token;
     if (req.headers.authorization && req.headers.authorization.startsWith("Bearer")) {
         token = req.headers.authorization.split(" ")[1];

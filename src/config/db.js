@@ -6,7 +6,7 @@ const { Pool } = pkg;
 // Prisma Client
 const prisma = new PrismaClient({
     log:
-        process.env.NODE_ENV === "development" ? ["query", "info", "warn", "error"] : ["error"],
+        process.env.NODE_ENV === "development" ? ["info", "warn", "error"] : ["error"],
 });
 
 const connectDB = async () => {

@@ -135,13 +135,16 @@ router.get("/", async (req, res, next) => {
 });
 
 router.put("/:id/approve", async (req, res, next) => {
+    const { material_ids } = req.body;
+
     try {
         const indent = await indentService.approveIndent(
             req.params.id,
             req.user.id,
             req.user.role_id,
             req.user.area_id,
-            req.user.department_id
+            req.user.department_id,
+            material_ids
         );
         return res.status(200).json({
             status: 200,
