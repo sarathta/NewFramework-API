@@ -134,21 +134,19 @@ router.get("/", async (req, res, next) => {
     }
 });
 
-router.put("/:id/approve", async (req, res, next) => {
-    const { material_ids } = req.body;
-
+router.put("/:id/submit", async (req, res, next) => {
     try {
-        const indent = await indentService.approveIndent(
+        const indent = await indentService.submitIndentApproval(
             req.params.id,
             req.user.id,
             req.user.role_id,
             req.user.area_id,
             req.user.department_id,
-            material_ids
+            req.body
         );
         return res.status(200).json({
             status: 200,
-            message: "Indent approved successfully",
+            message: "Indent approval submitted successfully",
             data: indent,
         });
     } catch (error) {

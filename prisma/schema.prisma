@@ -90,6 +90,7 @@ model mst_materials {
   mst_inventory_control_thresholds mst_inventory_control_thresholds[]
   mst_material_categories          mst_material_categories            @relation(fields: [category_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_material_category")
   mst_vendor_materials             mst_vendor_materials[]
+  txn_approved_indent_materials    txn_approved_indent_materials[]
   txn_indent_items                 txn_indent_items[]
   txn_purchase_order_items         txn_purchase_order_items[]
   txn_stock_summary                txn_stock_summary[]
@@ -146,51 +147,54 @@ model mst_vendors {
 }
 
 model txn_indent_items {
-  id             Int           @id(map: "indent_items_pkey") @default(autoincrement())
-  indent_id      Int
-  material_id    Int
-  quantity       Decimal       @db.Decimal(14, 3)
-  unit_price     Decimal       @db.Decimal(14, 2)
-  material_code  String        @db.VarChar(50)
-  description    String        @db.VarChar(500)
-  uom            String        @db.VarChar(20)
-  gst_rate       Decimal       @db.Decimal(5, 2)
-  is_l1_approved Boolean?      @default(false)
-  is_l2_approved Boolean?      @default(false)
-  is_rejected    Boolean?      @default(false)
-  txn_indents    txn_indents   @relation(fields: [indent_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_indent_item_indent")
-  mst_materials  mst_materials @relation(fields: [material_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_indent_item_material")
+  id               Int           @id(map: "indent_items_pkey") @default(autoincrement())
+  indent_id        Int
+  material_id      Int
+  quantity         Decimal       @db.Decimal(14, 3)
+  unit_price       Decimal       @db.Decimal(14, 2)
+  material_code    String        @db.VarChar(50)
+  description      String        @db.VarChar(500)
+  uom              String        @db.VarChar(20)
+  gst_rate         Decimal       @db.Decimal(5, 2)
+  is_l1_approved   Boolean?      @default(false)
+  is_l2_approved   Boolean?      @default(false)
+  is_rejected      Boolean?      @default(false)
+  rejection_reason String?       @db.VarChar(500)
+  txn_indents      txn_indents   @relation(fields: [indent_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_indent_item_indent")
+  mst_materials    mst_materials @relation(fields: [material_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_indent_item_material")
 }
 
 model txn_indents {
-  id                                                      Int                   @id(map: "indents_pkey") @default(autoincrement())
-  indent_no                                               String                @unique(map: "indents_indent_no_key") @db.VarChar(30)
+  id                                                      Int                             @id(map: "indents_pkey") @default(autoincrement())
+  indent_no                                               String                          @unique(map: "indents_indent_no_key") @db.VarChar(30)
   department_id                                           Int
   requested_by                                            Int
-  total_value                                             Decimal               @db.Decimal(14, 2)
-  l1_approved                                             Boolean?              @default(false)
-  l2_approved                                             Boolean?              @default(false)
-  rejection_reason                                        String?               @db.VarChar(200)
-  created_at                                              DateTime?             @default(now()) @db.Timestamptz(6)
-  updated_at                                              DateTime?             @db.Timestamptz(6)
+  total_value                                             Decimal                         @db.Decimal(14, 2)
+  l1_approved                                             Boolean?                        @default(false)
+  l2_approved                                             Boolean?                        @default(false)
+  rejection_reason                                        String?                         @db.VarChar(200)
+  created_at                                              DateTime?                       @default(now()) @db.Timestamptz(6)
+  updated_at                                              DateTime?                       @db.Timestamptz(6)
   l1_approved_by                                          Int?
-  l1_approved_at                                          DateTime?             @db.Timestamptz(6)
+  l1_approved_at                                          DateTime?                       @db.Timestamptz(6)
   l2_approved_by                                          Int?
-  l2_approved_at                                          DateTime?             @db.Timestamptz(6)
+  l2_approved_at                                          DateTime?                       @db.Timestamptz(6)
   status_id                                               Int?
   l1_approval_required                                    Boolean?
   l2_approval_required                                    Boolean?
   area_id                                                 Int
-  is_material_issue                                       Boolean               @default(false)
-  is_draft                                                Boolean               @default(false)
+  is_material_issue                                       Boolean                         @default(false)
+  is_draft                                                Boolean                         @default(false)
+  is_l1_partially_approved                                Boolean?                        @default(false)
+  is_l2_partially_approved                                Boolean?                        @default(false)
+  txn_approved_indent_materials                           txn_approved_indent_materials[]
   txn_indent_items                                        txn_indent_items[]
-  mst_area                                                mst_area              @relation(fields: [area_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_indent_area")
-  mst_departments                                         mst_departments       @relation(fields: [department_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_indent_department")
-  mst_indent_statuses                                     mst_indent_statuses?  @relation(fields: [status_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_indent_status")
-  mst_employees_txn_indents_l1_approved_byTomst_employees mst_employees?        @relation("txn_indents_l1_approved_byTomst_employees", fields: [l1_approved_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_indents_l1_approved_by")
-  mst_employees_txn_indents_l2_approved_byTomst_employees mst_employees?        @relation("txn_indents_l2_approved_byTomst_employees", fields: [l2_approved_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_indents_l2_approved_by")
-  mst_employees_txn_indents_requested_byTomst_employees   mst_employees         @relation("txn_indents_requested_byTomst_employees", fields: [requested_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_indents_requested_by")
-  txn_purchase_orders                                     txn_purchase_orders[]
+  mst_area                                                mst_area                        @relation(fields: [area_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_indent_area")
+  mst_departments                                         mst_departments                 @relation(fields: [department_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_indent_department")
+  mst_indent_statuses                                     mst_indent_statuses?            @relation(fields: [status_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_indent_status")
+  mst_employees_txn_indents_l1_approved_byTomst_employees mst_employees?                  @relation("txn_indents_l1_approved_byTomst_employees", fields: [l1_approved_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_indents_l1_approved_by")
+  mst_employees_txn_indents_l2_approved_byTomst_employees mst_employees?                  @relation("txn_indents_l2_approved_byTomst_employees", fields: [l2_approved_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_indents_l2_approved_by")
+  mst_employees_txn_indents_requested_byTomst_employees   mst_employees                   @relation("txn_indents_requested_byTomst_employees", fields: [requested_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_indents_requested_by")
 }
 
 model txn_purchase_order_items {
@@ -210,7 +214,6 @@ model txn_purchase_order_items {
 model txn_purchase_orders {
   id                       Int                        @id(map: "purchase_orders_pkey") @default(autoincrement())
   po_no                    String                     @unique(map: "purchase_orders_po_no_key") @db.VarChar(30)
-  indent_id                Int
   vendor_id                Int
   version                  Int?                       @default(1)
   subtotal                 Decimal                    @db.Decimal(14, 4)
@@ -233,7 +236,6 @@ model txn_purchase_orders {
   billing_address          String?                    @db.VarChar(200)
   txn_purchase_order_items txn_purchase_order_items[]
   mst_currencies           mst_currencies?            @relation(fields: [currency_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "purchase_orders_currency_id_fkey")
-  txn_indents              txn_indents                @relation(fields: [indent_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "purchase_orders_indent_id_fkey")
   mst_vendors              mst_vendors                @relation(fields: [vendor_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "purchase_orders_vendor_id_fkey")
 }
 
@@ -266,4 +268,20 @@ model mst_system_parameters {
   type        Int?
   value       String? @db.VarChar
   datatype    String? @db.VarChar
+}
+
+model txn_approved_indent_materials {
+  id                    Int           @id @default(autoincrement())
+  material_id           Int
+  indent_id             Int
+  quantity              Decimal       @db.Decimal(12, 2)
+  price                 Decimal       @db.Decimal(12, 2)
+  approved_date         DateTime      @default(now()) @db.Timestamp(6)
+  is_received           Boolean       @default(false)
+  is_partially_received Boolean       @default(false)
+  received_quantity     Decimal       @default(0) @db.Decimal(12, 2)
+  po_id                 Int?
+  po_no                 String?       @db.VarChar(30)
+  txn_indents           txn_indents   @relation(fields: [indent_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_approved_indent_materials_indent")
+  mst_materials         mst_materials @relation(fields: [material_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_approved_indent_materials_material")
 }

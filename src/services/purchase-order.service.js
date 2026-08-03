@@ -449,8 +449,122 @@ async function getApprovedIndents() {
     return indents.map((indent) => formatApprovedIndent(indent, vendorsByMaterialId));
 }
 
+const approvedMaterialIndentSelect = {
+    id: true,
+    indent_no: true,
+    department_id: true,
+    area_id: true,
+    total_value: true,
+    created_at: true,
+    status_id: true,
+    mst_area: { select: { id: true, name: true } },
+    mst_departments: { select: { id: true, name: true } },
+    mst_indent_statuses: {
+        select: { id: true, code: true, codeId: true, description: true },
+    },
+};
+
+function toNumber(value) {
+    return Number(value ?? 0);
+}
+
+async function getApprovedMaterials() {
+    const rows = await prisma.txn_approved_indent_materials.findMany({
+        where: { is_received: false },
+        include: {
+            mst_materials: {
+                select: {
+                    id: true,
+                    code: true,
+                    description: true,
+                    category_id: true,
+                    mst_material_categories: {
+                        select: { id: true, code: true, name: true },
+                    },
+                },
+            },
+            txn_indents: { select: approvedMaterialIndentSelect },
+        },
+        orderBy: { approved_date: "desc" },
+    });
+
+    const grouped = new Map();
+
+    for (const row of rows) {
+        const quantity = toNumber(row.quantity);
+        const receivedQuantity = toNumber(row.received_quantity);
+        const pendingQuantity = quantity - receivedQuantity;
+
+        if (pendingQuantity <= 0) {
+            continue;
+        }
+
+        const unitPrice = toNumber(row.price);
+        const materialId = row.material_id;
+
+        if (!grouped.has(materialId)) {
+            const { mst_material_categories, ...material } = row.mst_materials;
+            grouped.set(materialId, {
+                material: {
+                    ...material,
+                    category: mst_material_categories,
+                },
+                pending_quantity: 0,
+                unit_price: unitPrice,
+                indents: [],
+            });
+        }
+
+        const group = grouped.get(materialId);
+        group.pending_quantity += pendingQuantity;
+        group.unit_price = Math.max(group.unit_price, unitPrice);
+
+        const {
+            mst_area,
+            mst_departments,
+            mst_indent_statuses,
+            ...indentData
+        } = row.txn_indents;
+
+        group.indents.push({
+            ...indentData,
+            area: mst_area,
+            department: mst_departments,
+            status: mst_indent_statuses
+                ? {
+                      id: mst_indent_statuses.id,
+                      code: mst_indent_statuses.code,
+                      code_id: mst_indent_statuses.codeId,
+                      description: mst_indent_statuses.description,
+                  }
+                : null,
+            approved_material_id: row.id,
+            quantity,
+            received_quantity: receivedQuantity,
+            pending_quantity: pendingQuantity,
+            unit_price: unitPrice,
+            approved_date: row.approved_date,
+            is_partially_received: row.is_partially_received,
+            po_id: row.po_id,
+            po_no: row.po_no,
+        });
+    }
+
+    const materialIds = [...grouped.keys()];
+    const vendorsByMaterialId = await getVendorsByMaterialIds(materialIds);
+
+    return materialIds.map((materialId) => {
+        const group = grouped.get(materialId);
+        return {
+            ...group,
+            vendors: vendorsByMaterialId.get(materialId) ?? [],
+        };
+    });
+}
+
 module.exports = {
     getApprovedIndents,
+    getApprovedMaterials,
     createDraft: (payload) => createPurchaseOrder(payload, PO_TYPE_DRAFT),
     createPurchaseOrder: (payload) => createPurchaseOrder(payload, PO_TYPE_ORDER),
     getDrafts: () => getPurchaseOrdersByType(PO_TYPE_DRAFT),

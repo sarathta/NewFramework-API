@@ -29,6 +29,15 @@ router.get("/approved-indents", async (req, res, next) => {
     }
 });
 
+router.get("/approved-materials", async (req, res, next) => {
+    try {
+        const approvedMaterials = await purchaseOrderService.getApprovedMaterials();
+        return res.status(200).json(approvedMaterials);
+    } catch (error) {
+        next(error);
+    }
+});
+
 router.post("/draft", async (req, res, next) => {
     try {
         const draft = await purchaseOrderService.createDraft(req.body);

@@ -12,6 +12,7 @@ const {
     STATUS_COMPLETED_CODE_ID,
     STATUS_REJECTED_CODE_ID,
     STATUS_L1_L2_APPROVED_CODE_ID,
+    STATUS_PARTIALLY_APPROVED_CODE_ID,
 } = require("../config/status.config");
 
 const indentInclude = {
@@ -41,34 +42,38 @@ function serializeIndentItem(item) {
     };
 }
 
-function getItemStatus(item, indent) {
+function getItemStatus(item, indent, roleId = null) {
     if (item.is_rejected) {
         return "rejected";
     }
 
-    if (!indent.l1_approval_required && !indent.l2_approval_required) {
-        return "approved";
-    }
-
-    if (indent.l2_approval_required) {
-        if (item.is_l2_approved && indent.l2_approved) {
+    if (roleId === ROLE_L1_APPROVER) {
+        if (item.is_l1_approved && !item.is_rejected) {
             return "approved";
-        }
-
-        if (indent.l1_approved && !item.is_l1_approved) {
-            return "rejected";
         }
 
         return "pending";
     }
 
-    if (indent.l1_approval_required) {
-        if (item.is_l1_approved && indent.l1_approved) {
+    if (roleId === ROLE_L2_APPROVER) {
+        if (item.is_l2_approved && !item.is_rejected) {
             return "approved";
         }
 
-        if (indent.l1_approved && !item.is_l1_approved) {
-            return "rejected";
+        return "pending";
+    }
+
+    if (indent.l1_approval_required && indent.l2_approval_required) {
+        if (item.is_l1_approved && item.is_l2_approved) {
+            return "approved";
+        }
+
+        return "pending";
+    }
+
+    if (indent.l1_approval_required && !indent.l2_approval_required) {
+        if (item.is_l1_approved) {
+            return "approved";
         }
 
         return "pending";
@@ -91,15 +96,20 @@ function shouldFilterItemsForRole(indent, userId, roleId) {
 
 function filterItemsForRole(items, indent, roleId) {
     if (roleId === ROLE_L1_APPROVER) {
-        if (!indent.l1_approved) {
-            return items.filter((item) => getItemStatus(item, indent) === "pending");
-        }
-
-        return items.filter((item) => item.is_l1_approved || item.is_rejected);
+        return items.filter(
+            (item) =>
+                item.is_l1_approved ||
+                item.is_rejected ||
+                getItemStatus(item, indent, roleId) === "pending"
+        );
     }
 
     if (roleId === ROLE_L2_APPROVER) {
-        return items.filter((item) => item.is_l1_approved && !item.is_rejected);
+        if (!indent.l2_approval_required) {
+            return items;
+        }
+
+        return items.filter((item) => item.is_l1_approved);
     }
 
     return items;
@@ -137,7 +147,7 @@ function formatIndent(indent, roleId = null, userId = null) {
             : null,
         items: items.map((item) => ({
             ...serializeIndentItem(item),
-            status: getItemStatus(item, indent),
+            status: getItemStatus(item, indent, roleId),
         })),
         requested_by_employee: mst_employees_txn_indents_requested_byTomst_employees,
         l1_approved_by_employee: mst_employees_txn_indents_l1_approved_byTomst_employees,
@@ -849,8 +859,14 @@ async function deleteIndent(id, userId, roleId) {
         include: indentInclude,
     });
 
-    await prisma.txn_indents.delete({
-        where: { id: Number(id) },
+    await prisma.$transaction(async (tx) => {
+        await tx.txn_approved_indent_materials.deleteMany({
+            where: { indent_id: Number(id) },
+        });
+
+        await tx.txn_indents.delete({
+            where: { id: Number(id) },
+        });
     });
 
     return formatIndent(fullIndent);
@@ -907,19 +923,96 @@ function ensureSameDepartment(indent, approverAreaId, approverDepartmentId, role
     }
 }
 
-function validateApprovalMaterialIds(materialIds, indentItems, approvalLevel) {
-    if (!Array.isArray(materialIds) || materialIds.length === 0) {
-        const error = new Error("material_ids must be a non-empty array");
+function normalizeMaterialIdList(materialIds, fieldName) {
+    if (materialIds == null) {
+        return [];
+    }
+
+    if (!Array.isArray(materialIds)) {
+        const error = new Error(`${fieldName} must be an array`);
         error.statusCode = 400;
         throw error;
     }
 
-    const approvedMaterialIds = [...new Set(materialIds.map((id) => Number(id)))];
+    return [...new Set(materialIds.map((id) => Number(id)))];
+}
+
+function buildRejectionReasonMap(rejectionReasons) {
+    if (rejectionReasons == null) {
+        return new Map();
+    }
+
+    if (!Array.isArray(rejectionReasons)) {
+        const error = new Error("rejection_reasons must be an array");
+        error.statusCode = 400;
+        throw error;
+    }
+
+    const reasonMap = new Map();
+
+    for (const entry of rejectionReasons) {
+        if (!entry || entry.material_id == null) {
+            const error = new Error(
+                "Each rejection_reasons entry must include material_id"
+            );
+            error.statusCode = 400;
+            throw error;
+        }
+
+        reasonMap.set(Number(entry.material_id), entry.rejection_reason ?? null);
+    }
+
+    return reasonMap;
+}
+
+function validateSubmitMaterialIds(
+    approvedMaterialIds,
+    rejectedMaterialIds,
+    rejectionReasonMap,
+    indentItems,
+    approvalLevel
+) {
+    if (approvedMaterialIds.length === 0 && rejectedMaterialIds.length === 0) {
+        const error = new Error(
+            "At least one of approved_material_ids or rejected_material_ids is required"
+        );
+        error.statusCode = 400;
+        throw error;
+    }
+
     const indentMaterialIds = new Set(indentItems.map((item) => item.material_id));
+    const approvedSet = new Set(approvedMaterialIds);
+    const rejectedSet = new Set(rejectedMaterialIds);
 
     for (const materialId of approvedMaterialIds) {
+        if (rejectedSet.has(materialId)) {
+            const error = new Error(
+                `Material ${materialId} cannot be both approved and rejected`
+            );
+            error.statusCode = 400;
+            throw error;
+        }
+
         if (!indentMaterialIds.has(materialId)) {
             const error = new Error(`Material ${materialId} not found in indent items`);
+            error.statusCode = 400;
+            throw error;
+        }
+    }
+
+    for (const materialId of rejectedMaterialIds) {
+        if (!indentMaterialIds.has(materialId)) {
+            const error = new Error(`Material ${materialId} not found in indent items`);
+            error.statusCode = 400;
+            throw error;
+        }
+    }
+
+    for (const materialId of rejectionReasonMap.keys()) {
+        if (!rejectedSet.has(materialId)) {
+            const error = new Error(
+                `rejection_reasons material ${materialId} must be in rejected_material_ids`
+            );
             error.statusCode = 400;
             throw error;
         }
@@ -932,7 +1025,7 @@ function validateApprovalMaterialIds(materialIds, indentItems, approvalLevel) {
                 .map((item) => item.material_id)
         );
 
-        for (const materialId of approvedMaterialIds) {
+        for (const materialId of [...approvedSet, ...rejectedSet]) {
             if (!l2EligibleIds.has(materialId)) {
                 const error = new Error(
                     `Material ${materialId} is not eligible for L2 approval`
@@ -943,81 +1036,206 @@ function validateApprovalMaterialIds(materialIds, indentItems, approvalLevel) {
         }
     }
 
-    return approvedMaterialIds;
+    return { approvedSet, rejectedSet };
 }
 
-async function updateIndentItemsForApproval(tx, indentItems, approvedMaterialIds, approvalLevel) {
-    const approvedSet = new Set(approvedMaterialIds);
-
+async function updateIndentItemsForSubmit(
+    tx,
+    indentItems,
+    approvedSet,
+    rejectedSet,
+    rejectionReasonMap,
+    approvalLevel
+) {
     for (const item of indentItems) {
-        if (approvalLevel === "l1") {
-            if (approvedSet.has(item.material_id)) {
-                await tx.txn_indent_items.update({
-                    where: { id: item.id },
-                    data: { is_l1_approved: true, is_rejected: false },
-                });
-            } else {
-                await tx.txn_indent_items.update({
-                    where: { id: item.id },
-                    data: { is_l1_approved: false, is_rejected: true },
-                });
-            }
-            continue;
-        }
-
-        if (!item.is_l1_approved || item.is_rejected) {
-            continue;
-        }
-
         if (approvedSet.has(item.material_id)) {
+            const data =
+                approvalLevel === "l1"
+                    ? { is_l1_approved: true, is_rejected: false, rejection_reason: null }
+                    : { is_l2_approved: true, is_rejected: false, rejection_reason: null };
+
             await tx.txn_indent_items.update({
                 where: { id: item.id },
-                data: { is_l2_approved: true, is_rejected: false },
+                data,
             });
-        } else {
+            continue;
+        }
+
+        if (rejectedSet.has(item.material_id)) {
             await tx.txn_indent_items.update({
                 where: { id: item.id },
-                data: { is_rejected: true },
+                data: {
+                    is_rejected: true,
+                    rejection_reason: rejectionReasonMap.get(item.material_id) ?? null,
+                    ...(approvalLevel === "l1"
+                        ? { is_l1_approved: false }
+                        : { is_l2_approved: false }),
+                },
             });
         }
     }
 }
 
-async function resolveApprovalStatusId(indent, approvalLevel) {
-    if (approvalLevel === "l1") {
-        if (indent.is_material_issue && !indent.l2_approval_required) {
-            return getStatusIdByCodeId(
-                STATUS_MATERIAL_ISSUE_CODE_ID,
-                "Approval status not found"
-            );
-        }
+async function resolveFinalApprovalStatusId(indent, hasUndecidedItems) {
+    const approvalRequired =
+        Boolean(indent.l1_approval_required) || Boolean(indent.l2_approval_required);
 
-        if (!indent.is_material_issue && !indent.l2_approval_required) {
-            return getStatusIdByCodeId(
-                STATUS_L1_L2_APPROVED_CODE_ID,
-                "Approval status not found"
-            );
-        }
-
-        return getStatusIdByCodeId(STATUS_L1_APPROVED_CODE_ID, "Approval status not found");
+    if (approvalRequired && hasUndecidedItems) {
+        return getStatusIdByCodeId(
+            STATUS_PARTIALLY_APPROVED_CODE_ID,
+            "Partially approved status not found"
+        );
     }
 
-    const l2StatusCodeId = indent.is_material_issue
+    const statusCodeId = indent.is_material_issue
         ? STATUS_MATERIAL_ISSUE_CODE_ID
         : STATUS_L1_L2_APPROVED_CODE_ID;
 
-    return getStatusIdByCodeId(l2StatusCodeId, "Approval status not found");
+    return getStatusIdByCodeId(statusCodeId, "Approval status not found");
 }
 
-async function applyIndentApproval(id, userId, indent, materialIds, approvalLevel) {
-    const approvedMaterialIds = validateApprovalMaterialIds(
-        materialIds,
+async function resolveApprovalStatusId(indent, approvalLevel, hasUndecidedItems = false) {
+    if (approvalLevel === "l1") {
+        if (indent.l2_approval_required) {
+            return getStatusIdByCodeId(
+                STATUS_L1_APPROVED_CODE_ID,
+                "Approval status not found"
+            );
+        }
+
+        return resolveFinalApprovalStatusId(indent, hasUndecidedItems);
+    }
+
+    return resolveFinalApprovalStatusId(indent, hasUndecidedItems);
+}
+
+function getItemsForApprovalLevel(indentItems, approvalLevel) {
+    if (approvalLevel === "l2") {
+        return indentItems.filter((item) => item.is_l1_approved && !item.is_rejected);
+    }
+
+    return indentItems;
+}
+
+function isPartiallyApproved(indentItems, approvedSet, rejectedSet, approvalLevel) {
+    return getItemsForApprovalLevel(indentItems, approvalLevel).some(
+        (item) => !approvedSet.has(item.material_id) && !rejectedSet.has(item.material_id)
+    );
+}
+
+function areAllMaterialsApproved(indentItems, approvedSet, approvalLevel) {
+    const items = getItemsForApprovalLevel(indentItems, approvalLevel);
+    return items.length > 0 && items.every((item) => approvedSet.has(item.material_id));
+}
+
+function hasUndecidedIndentItems(indentItems, approvedSet, rejectedSet) {
+    return indentItems.some((item) => {
+        if (approvedSet.has(item.material_id) || rejectedSet.has(item.material_id)) {
+            return false;
+        }
+
+        return !item.is_l1_approved && !item.is_l2_approved && !item.is_rejected;
+    });
+}
+
+async function syncApprovedIndentMaterials(tx, indentId, indent, approvalLevel) {
+    const l1Required = Boolean(indent.l1_approval_required);
+    const l2Required = Boolean(indent.l2_approval_required);
+
+    const shouldSyncBothLevels =
+        l1Required &&
+        l2Required &&
+        Boolean(indent.l1_approved) &&
+        approvalLevel === "l2";
+
+    const shouldSyncL1Only = l1Required && !l2Required && approvalLevel === "l1";
+
+    if (!shouldSyncBothLevels && !shouldSyncL1Only) {
+        return;
+    }
+
+    const items = await tx.txn_indent_items.findMany({
+        where: {
+            indent_id: Number(indentId),
+            is_rejected: false,
+            ...(shouldSyncBothLevels
+                ? { is_l1_approved: true, is_l2_approved: true }
+                : { is_l1_approved: true }),
+        },
+    });
+
+    if (items.length === 0) {
+        return;
+    }
+
+    const existing = await tx.txn_approved_indent_materials.findMany({
+        where: {
+            indent_id: Number(indentId),
+            material_id: { in: items.map((item) => item.material_id) },
+        },
+        select: { material_id: true },
+    });
+
+    const existingMaterialIds = new Set(existing.map((row) => row.material_id));
+    const toCreate = items
+        .filter((item) => !existingMaterialIds.has(item.material_id))
+        .map((item) => ({
+            indent_id: Number(indentId),
+            material_id: item.material_id,
+            quantity: item.quantity,
+            price: item.unit_price,
+            approved_date: new Date(),
+        }));
+
+    if (toCreate.length > 0) {
+        await tx.txn_approved_indent_materials.createMany({ data: toCreate });
+    }
+}
+
+async function applyIndentSubmit(id, userId, indent, payload, approvalLevel) {
+    const approvedMaterialIds = normalizeMaterialIdList(
+        payload.approved_material_ids,
+        "approved_material_ids"
+    );
+    const rejectedMaterialIds = normalizeMaterialIdList(
+        payload.rejected_material_ids,
+        "rejected_material_ids"
+    );
+    const rejectionReasonMap = buildRejectionReasonMap(payload.rejection_reasons);
+
+    const { approvedSet, rejectedSet } = validateSubmitMaterialIds(
+        approvedMaterialIds,
+        rejectedMaterialIds,
+        rejectionReasonMap,
         indent.txn_indent_items,
         approvalLevel
     );
 
     const now = new Date();
-    const statusId = await resolveApprovalStatusId(indent, approvalLevel);
+    const allApproved = areAllMaterialsApproved(
+        indent.txn_indent_items,
+        approvedSet,
+        approvalLevel
+    );
+    const partiallyApproved = allApproved
+        ? false
+        : isPartiallyApproved(
+              indent.txn_indent_items,
+              approvedSet,
+              rejectedSet,
+              approvalLevel
+          );
+    const undecidedItems = hasUndecidedIndentItems(
+        indent.txn_indent_items,
+        approvedSet,
+        rejectedSet
+    );
+    const statusId = await resolveApprovalStatusId(
+        indent,
+        approvalLevel,
+        undecidedItems
+    );
+
     const updateData = {
         updated_at: now,
         status_id: statusId,
@@ -1027,17 +1245,21 @@ async function applyIndentApproval(id, userId, indent, materialIds, approvalLeve
         updateData.l1_approved = true;
         updateData.l1_approved_by = userId;
         updateData.l1_approved_at = now;
+        updateData.is_l1_partially_approved = partiallyApproved;
     } else {
         updateData.l2_approved = true;
         updateData.l2_approved_by = userId;
         updateData.l2_approved_at = now;
+        updateData.is_l2_partially_approved = partiallyApproved;
     }
 
     await prisma.$transaction(async (tx) => {
-        await updateIndentItemsForApproval(
+        await updateIndentItemsForSubmit(
             tx,
             indent.txn_indent_items,
-            approvedMaterialIds,
+            approvedSet,
+            rejectedSet,
+            rejectionReasonMap,
             approvalLevel
         );
 
@@ -1045,6 +1267,8 @@ async function applyIndentApproval(id, userId, indent, materialIds, approvalLeve
             where: { id: Number(id) },
             data: updateData,
         });
+
+        await syncApprovedIndentMaterials(tx, id, indent, approvalLevel);
     });
 
     const updatedIndent = await prisma.txn_indents.findUnique({
@@ -1055,23 +1279,65 @@ async function applyIndentApproval(id, userId, indent, materialIds, approvalLeve
     return formatIndent(updatedIndent);
 }
 
-async function approveIndentAsAdmin(id, userId, indent, materialIds) {
-    let approvalLevel;
-
+function resolveApprovalLevelForAdmin(indent) {
     if (indent.l1_approval_required && !indent.l1_approved) {
-        approvalLevel = "l1";
-    } else if (indent.l2_approval_required && !indent.l2_approved) {
-        approvalLevel = "l2";
-    } else {
-        const error = new Error("No approval is pending for this indent");
-        error.statusCode = 409;
-        throw error;
+        return "l1";
     }
 
-    return applyIndentApproval(id, userId, indent, materialIds, approvalLevel);
+    if (indent.l2_approval_required && !indent.l2_approved) {
+        return "l2";
+    }
+
+    const error = new Error("No approval is pending for this indent");
+    error.statusCode = 409;
+    throw error;
 }
 
-async function approveIndent(id, userId, roleId, areaId, departmentId, materialIds) {
+function resolveApprovalLevelForRole(indent, roleId) {
+    if (roleId === ROLE_L1_APPROVER) {
+        if (indent.l1_approved) {
+            const error = new Error("Indent is already L1 approved");
+            error.statusCode = 409;
+            throw error;
+        }
+
+        if (!indent.l1_approval_required) {
+            const error = new Error("L1 approval is not required for this indent");
+            error.statusCode = 409;
+            throw error;
+        }
+
+        return "l1";
+    }
+
+    if (roleId === ROLE_L2_APPROVER) {
+        if (!indent.l1_approved) {
+            const error = new Error("L1 approval is required before L2 approval");
+            error.statusCode = 409;
+            throw error;
+        }
+
+        if (indent.l2_approved) {
+            const error = new Error("Indent is already L2 approved");
+            error.statusCode = 409;
+            throw error;
+        }
+
+        if (!indent.l2_approval_required) {
+            const error = new Error("L2 approval is not required for this indent");
+            error.statusCode = 409;
+            throw error;
+        }
+
+        return "l2";
+    }
+
+    const error = new Error("Only approvers can perform this action");
+    error.statusCode = 403;
+    throw error;
+}
+
+async function submitIndentApproval(id, userId, roleId, areaId, departmentId, payload = {}) {
     ensureApproverRole(roleId);
 
     if (!isAdministrator(roleId)) {
@@ -1103,53 +1369,11 @@ async function approveIndent(id, userId, roleId, areaId, departmentId, materialI
         throw error;
     }
 
-    if (isAdministrator(roleId)) {
-        return approveIndentAsAdmin(id, userId, indent, materialIds);
-    }
+    const approvalLevel = isAdministrator(roleId)
+        ? resolveApprovalLevelForAdmin(indent)
+        : resolveApprovalLevelForRole(indent, roleId);
 
-    let approvalLevel;
-
-    if (roleId === ROLE_L1_APPROVER) {
-        if (indent.l1_approved) {
-            const error = new Error("Indent is already L1 approved");
-            error.statusCode = 409;
-            throw error;
-        }
-
-        if (!indent.l1_approval_required) {
-            const error = new Error("L1 approval is not required for this indent");
-            error.statusCode = 409;
-            throw error;
-        }
-
-        approvalLevel = "l1";
-    } else if (roleId === ROLE_L2_APPROVER) {
-        if (!indent.l1_approved) {
-            const error = new Error("L1 approval is required before L2 approval");
-            error.statusCode = 409;
-            throw error;
-        }
-
-        if (indent.l2_approved) {
-            const error = new Error("Indent is already L2 approved");
-            error.statusCode = 409;
-            throw error;
-        }
-
-        if (!indent.l2_approval_required) {
-            const error = new Error("L2 approval is not required for this indent");
-            error.statusCode = 409;
-            throw error;
-        }
-
-        approvalLevel = "l2";
-    } else {
-        const error = new Error("Only approvers can perform this action");
-        error.statusCode = 403;
-        throw error;
-    }
-
-    return applyIndentApproval(id, userId, indent, materialIds, approvalLevel);
+    return applyIndentSubmit(id, userId, indent, payload, approvalLevel);
 }
 
 async function rejectIndent(id, userId, roleId, areaId, departmentId, rejectionReason) {
@@ -1293,6 +1517,6 @@ module.exports = {
     createMaterialIssueDraft,
     updateIndent,
     deleteIndent,
-    approveIndent,
+    submitIndentApproval,
     rejectIndent,
 };
