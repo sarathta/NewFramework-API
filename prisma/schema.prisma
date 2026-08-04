@@ -234,6 +234,12 @@ model txn_purchase_orders {
   expected_delivery        DateTime?                  @db.Timestamptz(6)
   type                     Int?
   billing_address          String?                    @db.VarChar(200)
+  l1_approval_required     Boolean?
+  l2_approval_req          Boolean?
+  l1_approved              Boolean?
+  l1_approved_at           DateTime?                  @db.Timestamptz(6)
+  l2_approved              Boolean?
+  l2_approved_at           Boolean?
   txn_purchase_order_items txn_purchase_order_items[]
   mst_currencies           mst_currencies?            @relation(fields: [currency_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "purchase_orders_currency_id_fkey")
   mst_vendors              mst_vendors                @relation(fields: [vendor_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "purchase_orders_vendor_id_fkey")

@@ -1,7 +1,6 @@
 const { prisma } = require("../config/db");
 const {
     STATUS_L1_L2_APPROVED_CODE_ID,
-    STATUS_PO_GENERATED_CODE_ID,
     PO_TYPE_DRAFT,
     PO_TYPE_ORDER,
 } = require("../config/status.config");
@@ -36,9 +35,6 @@ const vendorSelect = {
 const purchaseOrderInclude = {
     txn_purchase_order_items: true,
     mst_vendors: { select: vendorSelect },
-    txn_indents: {
-        select: { id: true, indent_no: true, department_id: true, area_id: true },
-    },
     mst_currencies: {
         select: {
             id: true,
@@ -53,28 +49,6 @@ async function generatePoNo(prefix = "PO") {
     const count = await prisma.txn_purchase_orders.count();
     const year = new Date().getFullYear();
     return `${prefix}-${year}-${String(count + 1).padStart(5, "0")}`;
-}
-
-async function getStatusIdByCodeId(codeId, notFoundMessage) {
-    const status = await prisma.mst_indent_statuses.findFirst({
-        where: { codeId },
-        select: { id: true },
-    });
-
-    if (!status) {
-        const error = new Error(notFoundMessage);
-        error.statusCode = 404;
-        throw error;
-    }
-
-    return status.id;
-}
-
-async function getPoGeneratedStatusId() {
-    return getStatusIdByCodeId(
-        STATUS_PO_GENERATED_CODE_ID,
-        "PO generated status not found"
-    );
 }
 
 function validatePoItems(items) {
@@ -111,36 +85,38 @@ function validatePoItems(items) {
     }
 }
 
-function validateCreatePayload(payload) {
-    const requiredFields = [
-        "indent_id",
-        "vendor_id",
-        "sub_total",
-        "total_amount",
-    ];
+function getPayloadSubtotal(payload) {
+    return payload.subtotal ?? payload.sub_total;
+}
 
-    for (const field of requiredFields) {
-        if (payload[field] === undefined || payload[field] === null || payload[field] === "") {
-            const error = new Error(`${field} is required`);
-            error.statusCode = 400;
-            throw error;
-        }
+function validateCreatePayload(payload) {
+    if (payload.vendor_id === undefined || payload.vendor_id === null || payload.vendor_id === "") {
+        const error = new Error("vendor_id is required");
+        error.statusCode = 400;
+        throw error;
+    }
+
+    if (
+        getPayloadSubtotal(payload) === undefined ||
+        getPayloadSubtotal(payload) === null ||
+        getPayloadSubtotal(payload) === ""
+    ) {
+        const error = new Error("subtotal is required");
+        error.statusCode = 400;
+        throw error;
+    }
+
+    if (
+        payload.total_amount === undefined ||
+        payload.total_amount === null ||
+        payload.total_amount === ""
+    ) {
+        const error = new Error("total_amount is required");
+        error.statusCode = 400;
+        throw error;
     }
 
     validatePoItems(payload.items);
-}
-
-async function validateIndent(indentId) {
-    const indent = await prisma.txn_indents.findUnique({
-        where: { id: Number(indentId) },
-        select: { id: true },
-    });
-
-    if (!indent) {
-        const error = new Error("Indent not found");
-        error.statusCode = 404;
-        throw error;
-    }
 }
 
 async function validateVendor(vendorId) {
@@ -184,6 +160,81 @@ async function validateMaterials(items) {
     }
 }
 
+async function validateApprovedMaterials(items) {
+    const approvedMaterialIds = [
+        ...new Set(
+            items
+                .map((item) => item.approved_material_id)
+                .filter((id) => id !== undefined && id !== null && id !== "")
+                .map(Number)
+        ),
+    ];
+
+    if (approvedMaterialIds.length === 0) {
+        return;
+    }
+
+    const approvedMaterials = await prisma.txn_approved_indent_materials.findMany({
+        where: {
+            id: { in: approvedMaterialIds },
+            is_received: false,
+        },
+        select: {
+            id: true,
+            material_id: true,
+            quantity: true,
+            received_quantity: true,
+        },
+    });
+
+    if (approvedMaterials.length !== approvedMaterialIds.length) {
+        const error = new Error("One or more approved materials not found or already received");
+        error.statusCode = 404;
+        throw error;
+    }
+
+    const approvedById = new Map(approvedMaterials.map((row) => [row.id, row]));
+
+    for (const [index, item] of items.entries()) {
+        if (
+            item.approved_material_id === undefined ||
+            item.approved_material_id === null ||
+            item.approved_material_id === ""
+        ) {
+            continue;
+        }
+
+        const approved = approvedById.get(Number(item.approved_material_id));
+        if (!approved) {
+            const error = new Error(
+                `items[${index}].approved_material_id is invalid`
+            );
+            error.statusCode = 400;
+            throw error;
+        }
+
+        if (Number(approved.material_id) !== Number(item.material_id)) {
+            const error = new Error(
+                `items[${index}].material_id does not match approved material`
+            );
+            error.statusCode = 400;
+            throw error;
+        }
+
+        // const pendingQuantity =
+        //     Number(approved.quantity) - Number(approved.received_quantity);
+        // const requestedQuantity = Number(item.quantity ?? item.qty);
+
+        // if (requestedQuantity > pendingQuantity) {
+        //     const error = new Error(
+        //         `items[${index}].quantity exceeds pending approved quantity`
+        //     );
+        //     error.statusCode = 400;
+        //     throw error;
+        // }
+    }
+}
+
 function mapPoItems(items) {
     return items.map((item) => ({
         material_id: Number(item.material_id),
@@ -204,10 +255,16 @@ function parseOptionalDecimal(value) {
     return value === undefined || value === null || value === "" ? null : value;
 }
 
+function parseOptionalString(value) {
+    if (value === undefined || value === null || value === "") {
+        return null;
+    }
+    return value;
+}
+
 function formatPurchaseOrder(po) {
     const {
         mst_vendors,
-        txn_indents,
         mst_currencies,
         txn_purchase_order_items,
         subtotal,
@@ -221,11 +278,9 @@ function formatPurchaseOrder(po) {
         subtotal,
         sub_total: subtotal,
         gst_amount,
-        gst_rate: gst_amount,
         issued_date,
         po_date: issued_date,
         vendor: mst_vendors,
-        indent: txn_indents,
         currency: mst_currencies,
         items: txn_purchase_order_items.map(({ qty, ...item }) => ({
             ...item,
@@ -235,16 +290,11 @@ function formatPurchaseOrder(po) {
     };
 }
 
-async function createPurchaseOrder(payload, type) {
-    validateCreatePayload(payload);
-
+function buildPurchaseOrderFields(payload, type) {
     const {
-        indent_id,
         vendor_id,
         currency_id,
         exchange_rate,
-        sub_total,
-        gst_rate,
         gst_amount,
         total_amount,
         freight,
@@ -255,19 +305,12 @@ async function createPurchaseOrder(payload, type) {
         shipping_address,
         billing_address,
         expected_delivery,
+        issued_date,
         po_date,
-        items,
     } = payload;
 
-    await validateIndent(indent_id);
-    await validateVendor(vendor_id);
-
-    if (currency_id !== undefined && currency_id !== null && currency_id !== "") {
-        await validateCurrency(currency_id);
-    }
-
-    await validateMaterials(items);
-
+    const subtotal = getPayloadSubtotal(payload);
+    const poType = Number(payload.type ?? type);
     const numericExchangeRate = parseOptionalDecimal(exchange_rate);
     const numericTotalAmount = Number(total_amount);
     const baseCurrencyAmount =
@@ -275,61 +318,111 @@ async function createPurchaseOrder(payload, type) {
             ? numericTotalAmount * Number(numericExchangeRate)
             : null;
 
-    const prefix = type === PO_TYPE_DRAFT ? "DRF" : "PO";
-    const poNo = await generatePoNo(prefix);
-    const poGeneratedStatusId =
-        type === PO_TYPE_ORDER ? await getPoGeneratedStatusId() : null;
-
-    const purchaseOrderData = {
-        po_no: poNo,
-        indent_id: Number(indent_id),
-        vendor_id: Number(vendor_id),
-        type,
-        subtotal: sub_total,
-        gst_amount: parseOptionalDecimal(gst_rate ?? gst_amount),
-        total_amount: total_amount,
-        currency_id:
-            currency_id !== undefined && currency_id !== null && currency_id !== ""
-                ? Number(currency_id)
-                : null,
-        exchange_rate: numericExchangeRate,
-        base_currency_amount: baseCurrencyAmount,
-        freight: parseOptionalDecimal(freight),
-        packing: parseOptionalDecimal(packing),
-        other_charges: parseOptionalDecimal(other_charges),
-        remarks: remarks ?? null,
-        payment_terms: payment_terms ?? null,
-        shipping_address: shipping_address ?? null,
-        billing_address: billing_address ?? null,
-        expected_delivery: parseOptionalDate(expected_delivery),
-        issued_date: parseOptionalDate(po_date) ?? new Date(),
-        txn_purchase_order_items: {
-            create: mapPoItems(items),
+    return {
+        poType,
+        fields: {
+            vendor_id: Number(vendor_id),
+            type: poType,
+            subtotal,
+            gst_amount: parseOptionalDecimal(gst_amount),
+            total_amount,
+            currency_id:
+                currency_id !== undefined && currency_id !== null && currency_id !== ""
+                    ? Number(currency_id)
+                    : null,
+            exchange_rate: numericExchangeRate,
+            base_currency_amount: baseCurrencyAmount,
+            freight: parseOptionalDecimal(freight),
+            packing: parseOptionalDecimal(packing),
+            other_charges: parseOptionalDecimal(other_charges),
+            remarks: parseOptionalString(remarks),
+            payment_terms: parseOptionalString(payment_terms),
+            shipping_address: parseOptionalString(shipping_address),
+            billing_address: parseOptionalString(billing_address),
+            expected_delivery: parseOptionalDate(expected_delivery),
+            issued_date: parseOptionalDate(issued_date ?? po_date) ?? new Date(),
         },
     };
+}
 
-    const purchaseOrder =
-        type === PO_TYPE_ORDER
-            ? await prisma.$transaction(async (tx) => {
-                  const createdPo = await tx.txn_purchase_orders.create({
-                      data: purchaseOrderData,
-                      include: purchaseOrderInclude,
-                  });
+async function validatePurchaseOrderPayload(payload) {
+    validateCreatePayload(payload);
+    await validateVendor(payload.vendor_id);
 
-                  await tx.txn_indents.update({
-                      where: { id: Number(indent_id) },
-                      data: {
-                          status_id: poGeneratedStatusId,
-                          updated_at: new Date(),
-                      },
-                  });
+    if (
+        payload.currency_id !== undefined &&
+        payload.currency_id !== null &&
+        payload.currency_id !== ""
+    ) {
+        await validateCurrency(payload.currency_id);
+    }
 
-                  return createdPo;
-              })
-            : await prisma.txn_purchase_orders.create({
-                  data: purchaseOrderData,
-                  include: purchaseOrderInclude,
-              });
+    await validateMaterials(payload.items);
+    await validateApprovedMaterials(payload.items);
+}
+
+async function createPurchaseOrder(payload, type) {
+    await validatePurchaseOrderPayload(payload);
+
+    const { poType, fields } = buildPurchaseOrderFields(payload, type);
+    const prefix = poType === PO_TYPE_DRAFT ? "DRF" : "PO";
+    const poNo = await generatePoNo(prefix);
+
+    const purchaseOrder = await prisma.txn_purchase_orders.create({
+        data: {
+            ...fields,
+            po_no: poNo,
+            txn_purchase_order_items: {
+                create: mapPoItems(payload.items),
+            },
+        },
+        include: purchaseOrderInclude,
+    });
+
+    return formatPurchaseOrder(purchaseOrder);
+}
+
+async function updatePurchaseOrder(id, payload) {
+    const poId = Number(id);
+
+    const existing = await prisma.txn_purchase_orders.findUnique({
+        where: { id: poId },
+        select: { id: true, type: true, po_no: true },
+    });
+
+    if (!existing) {
+        const error = new Error("Purchase order not found");
+        error.statusCode = 404;
+        throw error;
+    }
+
+    await validatePurchaseOrderPayload(payload);
+
+    const { poType, fields } = buildPurchaseOrderFields(payload, existing.type);
+
+    let poNo = existing.po_no;
+    if (existing.type === PO_TYPE_DRAFT && poType === PO_TYPE_ORDER) {
+        poNo = await generatePoNo("PO");
+    }
+
+    const purchaseOrder = await prisma.$transaction(async (tx) => {
+        await tx.txn_purchase_order_items.deleteMany({
+            where: { po_id: poId },
+        });
+
+        return tx.txn_purchase_orders.update({
+            where: { id: poId },
+            data: {
+                ...fields,
+                po_no: poNo,
+                updated_at: new Date(),
+                txn_purchase_order_items: {
+                    create: mapPoItems(payload.items),
+                },
+            },
+            include: purchaseOrderInclude,
+        });
+    });
 
     return formatPurchaseOrder(purchaseOrder);
 }
@@ -337,6 +430,15 @@ async function createPurchaseOrder(payload, type) {
 async function getPurchaseOrdersByType(type) {
     const purchaseOrders = await prisma.txn_purchase_orders.findMany({
         where: { type },
+        include: purchaseOrderInclude,
+        orderBy: { created_at: "desc" },
+    });
+
+    return purchaseOrders.map(formatPurchaseOrder);
+}
+
+async function getPurchaseOrders() {
+    const purchaseOrders = await prisma.txn_purchase_orders.findMany({
         include: purchaseOrderInclude,
         orderBy: { created_at: "desc" },
     });
@@ -567,6 +669,7 @@ module.exports = {
     getApprovedMaterials,
     createDraft: (payload) => createPurchaseOrder(payload, PO_TYPE_DRAFT),
     createPurchaseOrder: (payload) => createPurchaseOrder(payload, PO_TYPE_ORDER),
+    updatePurchaseOrder,
     getDrafts: () => getPurchaseOrdersByType(PO_TYPE_DRAFT),
-    getPurchaseOrders: () => getPurchaseOrdersByType(PO_TYPE_ORDER),
+    getPurchaseOrders,
 };

@@ -73,6 +73,22 @@ router.post("/", async (req, res, next) => {
     }
 });
 
+router.put("/:id", async (req, res, next) => {
+    try {
+        const purchaseOrder = await purchaseOrderService.updatePurchaseOrder(
+            req.params.id,
+            req.body
+        );
+        return res.status(200).json({
+            status: 200,
+            message: "Purchase order updated successfully",
+            data: purchaseOrder,
+        });
+    } catch (error) {
+        return handleServiceError(error, res, next);
+    }
+});
+
 router.get("/", async (req, res, next) => {
     try {
         const purchaseOrders = await purchaseOrderService.getPurchaseOrders();
