@@ -4,6 +4,8 @@ const {
     PO_TYPE_DRAFT,
     PO_TYPE_ORDER,
 } = require("../config/status.config");
+const { APPROVAL_MODULE_PURCHASE_ORDER } = require("../config/approval-modules.config");
+const { evaluateApprovalRequirements } = require("./approval-rule-evaluator.service");
 
 const approvedIndentInclude = {
     mst_area: { select: { id: true, name: true } },
@@ -46,9 +48,35 @@ const purchaseOrderInclude = {
 };
 
 async function generatePoNo(prefix = "PO") {
-    const count = await prisma.txn_purchase_orders.count();
     const year = new Date().getFullYear();
-    return `${prefix}-${year}-${String(count + 1).padStart(5, "0")}`;
+    const poNoPrefix = `${prefix}-${year}-`;
+
+    const latestPo = await prisma.txn_purchase_orders.findFirst({
+        where: {
+            po_no: {
+                startsWith: poNoPrefix,
+            },
+        },
+        orderBy: {
+            po_no: "desc",
+        },
+        select: {
+            po_no: true,
+        },
+    });
+
+    let nextSequence = 1;
+
+    if (latestPo) {
+        const sequencePart = latestPo.po_no.slice(poNoPrefix.length);
+        const currentSequence = Number.parseInt(sequencePart, 10);
+
+        if (!Number.isNaN(currentSequence)) {
+            nextSequence = currentSequence + 1;
+        }
+    }
+
+    return `${poNoPrefix}${String(nextSequence).padStart(5, "0")}`;
 }
 
 function validatePoItems(items) {
@@ -361,16 +389,44 @@ async function validatePurchaseOrderPayload(payload) {
     await validateApprovedMaterials(payload.items);
 }
 
-async function createPurchaseOrder(payload, type) {
+async function resolvePurchaseOrderApprovalFields(poType, payload, userContext = {}) {
+    if (poType !== PO_TYPE_ORDER) {
+        return {
+            l1_approval_required: false,
+            l2_approval_req: false,
+        };
+    }
+
+    const approvalRequirements = await evaluateApprovalRequirements({
+        module: APPROVAL_MODULE_PURCHASE_ORDER,
+        roleId: userContext.roleId,
+        departmentId: userContext.departmentId,
+        items: payload.items ?? [],
+        totalAmount: payload.total_amount ?? getPayloadSubtotal(payload),
+    });
+
+    return {
+        l1_approval_required: approvalRequirements.l1ApprovalRequired,
+        l2_approval_req: approvalRequirements.l2ApprovalRequired,
+    };
+}
+
+async function createPurchaseOrder(payload, type, userContext = {}) {
     await validatePurchaseOrderPayload(payload);
 
     const { poType, fields } = buildPurchaseOrderFields(payload, type);
+    const approvalFields = await resolvePurchaseOrderApprovalFields(
+        poType,
+        payload,
+        userContext
+    );
     const prefix = poType === PO_TYPE_DRAFT ? "DRF" : "PO";
     const poNo = await generatePoNo(prefix);
 
     const purchaseOrder = await prisma.txn_purchase_orders.create({
         data: {
             ...fields,
+            ...approvalFields,
             po_no: poNo,
             txn_purchase_order_items: {
                 create: mapPoItems(payload.items),
@@ -382,7 +438,7 @@ async function createPurchaseOrder(payload, type) {
     return formatPurchaseOrder(purchaseOrder);
 }
 
-async function updatePurchaseOrder(id, payload) {
+async function updatePurchaseOrder(id, payload, userContext = {}) {
     const poId = Number(id);
 
     const existing = await prisma.txn_purchase_orders.findUnique({
@@ -399,6 +455,11 @@ async function updatePurchaseOrder(id, payload) {
     await validatePurchaseOrderPayload(payload);
 
     const { poType, fields } = buildPurchaseOrderFields(payload, existing.type);
+    const approvalFields = await resolvePurchaseOrderApprovalFields(
+        poType,
+        payload,
+        userContext
+    );
 
     let poNo = existing.po_no;
     if (existing.type === PO_TYPE_DRAFT && poType === PO_TYPE_ORDER) {
@@ -414,6 +475,7 @@ async function updatePurchaseOrder(id, payload) {
             where: { id: poId },
             data: {
                 ...fields,
+                ...approvalFields,
                 po_no: poNo,
                 updated_at: new Date(),
                 txn_purchase_order_items: {
@@ -668,7 +730,8 @@ module.exports = {
     getApprovedIndents,
     getApprovedMaterials,
     createDraft: (payload) => createPurchaseOrder(payload, PO_TYPE_DRAFT),
-    createPurchaseOrder: (payload) => createPurchaseOrder(payload, PO_TYPE_ORDER),
+    createPurchaseOrder: (payload, userContext) =>
+        createPurchaseOrder(payload, PO_TYPE_ORDER, userContext),
     updatePurchaseOrder,
     getDrafts: () => getPurchaseOrdersByType(PO_TYPE_DRAFT),
     getPurchaseOrders,

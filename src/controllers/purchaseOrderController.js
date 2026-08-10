@@ -62,7 +62,10 @@ router.get("/draft", async (req, res, next) => {
 
 router.post("/", async (req, res, next) => {
     try {
-        const purchaseOrder = await purchaseOrderService.createPurchaseOrder(req.body);
+        const purchaseOrder = await purchaseOrderService.createPurchaseOrder(req.body, {
+            roleId: req.user.role_id,
+            departmentId: req.user.department_id,
+        });
         return res.status(201).json({
             status: 201,
             message: "Purchase order created successfully",
@@ -77,7 +80,11 @@ router.put("/:id", async (req, res, next) => {
     try {
         const purchaseOrder = await purchaseOrderService.updatePurchaseOrder(
             req.params.id,
-            req.body
+            req.body,
+            {
+                roleId: req.user.role_id,
+                departmentId: req.user.department_id,
+            }
         );
         return res.status(200).json({
             status: 200,

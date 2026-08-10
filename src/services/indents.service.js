@@ -6,6 +6,11 @@ const {
     isApprover,
 } = require("../config/roles.config");
 const {
+    APPROVAL_MODULE_INDENT,
+    APPROVAL_MODULE_MATERIAL_ISSUE,
+} = require("../config/approval-modules.config");
+const { evaluateApprovalRequirements } = require("./approval-rule-evaluator.service");
+const {
     STATUS_MATERIAL_ISSUE_CODE_ID,
     STATUS_L1_APPROVAL_PENDING_CODE_ID,
     STATUS_L1_APPROVED_CODE_ID,
@@ -393,109 +398,6 @@ function calculateTotalValue(items) {
     );
 }
 
-async function getSystemParameter(name, notFoundMessage) {
-    const param = await prisma.mst_system_parameters.findFirst({
-        where: { name },
-        select: { value: true, datatype: true },
-    });
-
-    if (param?.value === null || param?.value === undefined || param?.value === "") {
-        if (notFoundMessage) {
-            const error = new Error(notFoundMessage);
-            error.statusCode = 404;
-            throw error;
-        }
-        return null;
-    }
-
-    return param;
-}
-
-function parseSystemParameterValue(param, parameterName) {
-    const { value, datatype } = param;
-
-    if (datatype === "number") {
-        const numericValue = Number(value);
-        if (Number.isNaN(numericValue)) {
-            const error = new Error(`${parameterName} value is not a valid number`);
-            error.statusCode = 500;
-            throw error;
-        }
-        return numericValue;
-    }
-
-    if (datatype === "boolean") {
-        return value === true || value === "true" || value === "1" || value === 1;
-    }
-
-    return value;
-}
-
-async function getSystemParameterValue(name, notFoundMessage) {
-    const param = await getSystemParameter(name, notFoundMessage);
-    if (!param) {
-        return null;
-    }
-
-    return parseSystemParameterValue(param, name);
-}
-
-async function getApprovalThreshold() {
-    return getSystemParameterValue(
-        "approvalThreshold",
-        "Approval threshold not found in system parameters"
-    );
-}
-
-async function getMaterialIssueApprovalThreshold() {
-    return getSystemParameterValue(
-        "approvalThresholdForMaterialIssue",
-        "Material issue approval threshold not found in system parameters"
-    );
-}
-
-async function isIndentApprovalEnabled() {
-    const param = await getSystemParameter("enableIndentApproval");
-    if (!param) {
-        return false;
-    }
-
-    return parseSystemParameterValue(param, "enableIndentApproval");
-}
-
-async function isMaterialIssueApprovalEnabled() {
-    const param = await getSystemParameter("enableMaterialIssueApproval");
-    if (!param) {
-        return false;
-    }
-
-    return parseSystemParameterValue(param, "enableMaterialIssueApproval");
-}
-
-function determineIndentApprovalRequirements(items, approvalThreshold) {
-    const hasItemAtOrAboveThreshold = items.some(
-        (item) => Number(item.unit_price * item.quantity) >= approvalThreshold
-    );
-
-    if (hasItemAtOrAboveThreshold) {
-        return { l1ApprovalRequired: true, l2ApprovalRequired: true };
-    }
-
-    return { l1ApprovalRequired: true, l2ApprovalRequired: false };
-}
-
-function determineMaterialIssueApprovalRequirements(items, approvalThreshold) {
-    const hasItemAtOrAboveThreshold = items.some(
-        (item) => Number(item.quantity) >= approvalThreshold
-    );
-
-    if (hasItemAtOrAboveThreshold) {
-        return { l1ApprovalRequired: true, l2ApprovalRequired: true };
-    }
-
-    return { l1ApprovalRequired: true, l2ApprovalRequired: false };
-}
-
 function mapIndentItems(items) {
     return items.map((item) => ({
         material_id: Number(item.material_id),
@@ -564,27 +466,24 @@ async function createIndent(userId, roleId,areaId, departmentId, data) {
     );
 
     const totalValue = calculateTotalValue(items);
-    let l1ApprovalRequired = false;
-    let l2ApprovalRequired = false;
-    let statusId = null;
 
-    const indentApprovalEnabled = await isIndentApprovalEnabled();
+    const approvalRequirements = await evaluateApprovalRequirements({
+        module: APPROVAL_MODULE_INDENT,
+        roleId,
+        departmentId: resolvedDepartmentId,
+        items,
+        totalAmount: totalValue,
+    });
+    const l1ApprovalRequired = approvalRequirements.l1ApprovalRequired;
+    const l2ApprovalRequired = approvalRequirements.l2ApprovalRequired;
 
-    if (indentApprovalEnabled) {
-        const approvalThreshold = await getApprovalThreshold();
-        const approvalRequirements = determineIndentApprovalRequirements(
-            items,
-            approvalThreshold
-        );
-        l1ApprovalRequired = approvalRequirements.l1ApprovalRequired;
-        l2ApprovalRequired = approvalRequirements.l2ApprovalRequired;
-        statusId = await getL1ApprovalPendingStatusId();
-    } else {
-        statusId = await getStatusIdByCodeId(
-            STATUS_L1_L2_APPROVED_CODE_ID,
-            "Approved status not found"
-        );
-    }
+    const requiresApproval = l1ApprovalRequired || l2ApprovalRequired;
+    const statusId = requiresApproval
+        ? await getL1ApprovalPendingStatusId()
+        : await getStatusIdByCodeId(
+              STATUS_L1_L2_APPROVED_CODE_ID,
+              "Approved status not found"
+          );
 
     const submitData = {
         area_id: resolvedAreaId,
@@ -630,7 +529,7 @@ async function createIndent(userId, roleId,areaId, departmentId, data) {
     return formatIndent(indent);
 }
 
-async function createMaterialIssueRequest(userId, areaId, departmentId, data) {
+async function createMaterialIssueRequest(userId, roleId, areaId, departmentId, data) {
     const { items, resolvedAreaId, resolvedDepartmentId } = await validateCreateInput(
         userId,
         areaId,
@@ -639,20 +538,16 @@ async function createMaterialIssueRequest(userId, areaId, departmentId, data) {
     );
 
     const totalValue = calculateTotalValue(items);
-    let l1ApprovalRequired = false;
-    let l2ApprovalRequired = false;
 
-    const materialIssueApprovalEnabled = await isMaterialIssueApprovalEnabled();
-
-    if (materialIssueApprovalEnabled) {
-        const approvalThreshold = await getMaterialIssueApprovalThreshold();
-        const approvalRequirements = determineMaterialIssueApprovalRequirements(
-            items,
-            approvalThreshold
-        );
-        l1ApprovalRequired = approvalRequirements.l1ApprovalRequired;
-        l2ApprovalRequired = approvalRequirements.l2ApprovalRequired;
-    }
+    const approvalRequirements = await evaluateApprovalRequirements({
+        module: APPROVAL_MODULE_MATERIAL_ISSUE,
+        roleId,
+        departmentId: resolvedDepartmentId,
+        items,
+        totalAmount: totalValue,
+    });
+    const l1ApprovalRequired = approvalRequirements.l1ApprovalRequired;
+    const l2ApprovalRequired = approvalRequirements.l2ApprovalRequired;
 
     const requiresApproval = l1ApprovalRequired || l2ApprovalRequired;
 
@@ -774,9 +669,6 @@ async function createMaterialIssueDraft(userId, areaId, departmentId, data) {
 async function getOwnedIndent(id, userId, roleId) {
     const indent = await prisma.txn_indents.findUnique({
         where: { id: Number(id) },
-        include: {
-            txn_purchase_orders: { select: { id: true } },
-        },
     });
 
     if (!indent) {
@@ -846,18 +738,20 @@ async function updateIndent(id, userId, roleId, areaId, departmentId, data) {
 }
 
 async function deleteIndent(id, userId, roleId) {
-    const indent = await getOwnedIndent(id, userId, roleId);
-
-    if (indent.txn_purchase_orders.length > 0) {
-        const error = new Error("Cannot delete indent with associated purchase orders");
-        error.statusCode = 409;
-        throw error;
+    if (!isAdministrator(roleId)) {
+        await getOwnedIndent(id, userId, roleId);
     }
 
     const fullIndent = await prisma.txn_indents.findUnique({
         where: { id: Number(id) },
         include: indentInclude,
     });
+
+    if (!fullIndent) {
+        const error = new Error("Indent not found");
+        error.statusCode = 404;
+        throw error;
+    }
 
     await prisma.$transaction(async (tx) => {
         await tx.txn_approved_indent_materials.deleteMany({
@@ -1139,6 +1033,10 @@ function hasUndecidedIndentItems(indentItems, approvedSet, rejectedSet) {
 }
 
 async function syncApprovedIndentMaterials(tx, indentId, indent, approvalLevel) {
+    if (indent.is_material_issue) {
+        return;
+    }
+
     const l1Required = Boolean(indent.l1_approval_required);
     const l2Required = Boolean(indent.l2_approval_required);
 

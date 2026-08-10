@@ -34,6 +34,7 @@ router.post("/material-issue-request", async (req, res, next) => {
     try {
         const materialIssueRequest = await indentService.createMaterialIssueRequest(
             req.user.id,
+            req.user.role_id,
             req.user.area_id,
             req.user.department_id,
             req.body
