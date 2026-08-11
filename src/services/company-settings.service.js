@@ -162,6 +162,72 @@ function mapTermsCreate(terms = []) {
     }));
 }
 
+function mapTermData(term, index) {
+    return {
+        title: term.title,
+        content: term.content,
+        display_order:
+            term.display_order !== undefined && term.display_order !== null
+                ? Number(term.display_order)
+                : index + 1,
+        enabled: term.enabled !== undefined ? Boolean(term.enabled) : true,
+        updated_at: new Date(),
+    };
+}
+
+async function syncPoTerms(tx, terms = []) {
+    const existingTerms = await tx.mst_po_terms.findMany({
+        select: { id: true },
+    });
+    const existingIds = new Set(existingTerms.map((term) => term.id));
+
+    const payloadIds = new Set();
+    const toCreate = [];
+
+    for (const [index, term] of terms.entries()) {
+        const termId =
+            term.id !== undefined && term.id !== null && term.id !== ""
+                ? Number(term.id)
+                : null;
+
+        if (termId) {
+            if (!existingIds.has(termId)) {
+                const error = new Error(`terms[${index}].id ${termId} not found`);
+                error.statusCode = 404;
+                throw error;
+            }
+
+            payloadIds.add(termId);
+            await tx.mst_po_terms.update({
+                where: { id: termId },
+                data: mapTermData(term, index),
+            });
+            continue;
+        }
+
+        toCreate.push(mapTermData(term, index));
+    }
+
+    const idsToDelete = [...existingIds].filter((id) => !payloadIds.has(id));
+
+    if (idsToDelete.length > 0) {
+        await tx.txn_purchase_order_terms.updateMany({
+            where: { term_id: { in: idsToDelete } },
+            data: { term_id: null },
+        });
+
+        await tx.mst_po_terms.deleteMany({
+            where: { id: { in: idsToDelete } },
+        });
+    }
+
+    if (toCreate.length > 0) {
+        await tx.mst_po_terms.createMany({
+            data: toCreate,
+        });
+    }
+}
+
 function deleteLogoFile(logoPath) {
     if (!logoPath || logoPath.startsWith("data:") || logoPath.startsWith("http")) {
         return;
@@ -264,12 +330,7 @@ async function updateCompanySettings(id, body, file) {
         });
 
         if (Array.isArray(payload.terms)) {
-            await tx.mst_po_terms.deleteMany({});
-            if (payload.terms.length > 0) {
-                await tx.mst_po_terms.createMany({
-                    data: mapTermsCreate(payload.terms),
-                });
-            }
+            await syncPoTerms(tx, payload.terms);
         }
 
         return updated;
