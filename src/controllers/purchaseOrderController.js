@@ -96,6 +96,19 @@ router.put("/:id", async (req, res, next) => {
     }
 });
 
+router.delete("/:id", async (req, res, next) => {
+    try {
+        const purchaseOrder = await purchaseOrderService.deletePurchaseOrder(req.params.id);
+        return res.status(200).json({
+            status: 200,
+            message: "Purchase order deleted successfully",
+            data: purchaseOrder,
+        });
+    } catch (error) {
+        return handleServiceError(error, res, next);
+    }
+});
+
 router.get("/", async (req, res, next) => {
     try {
         const purchaseOrders = await purchaseOrderService.getPurchaseOrders();

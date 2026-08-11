@@ -15,7 +15,8 @@ const indentsController = require('../controllers/indentsController');
 const materialIssueController = require('../controllers/materialIssueController');
 const purchaseOrderController = require('../controllers/purchaseOrderController');
 const vendorMaterialsController = require('../controllers/vendorMaterialsController');
-const systemParameetrsController = require('../controllers/systemParametersController')
+const systemParameetrsController = require('../controllers/systemParametersController');
+const companySettingsController = require('../controllers/companySettingsController');
 
 // Mount all routes
 router.use('/auth', authController);
@@ -31,5 +32,6 @@ router.use('/material-issue', materialIssueController);
 router.use('/purchase-order', purchaseOrderController);
 router.use('/vendor-materials', vendorMaterialsController);
 router.use('/system-parameters', systemParameetrsController);
+router.use('/company-settings', companySettingsController);
 
 module.exports = router;

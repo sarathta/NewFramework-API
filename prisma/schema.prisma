@@ -207,42 +207,49 @@ model txn_purchase_order_items {
   unit_price          Decimal             @db.Decimal(14, 2)
   uom                 String              @db.VarChar(20)
   gst_rate            Decimal             @db.Decimal(5, 2)
+  is_l1_approved      Boolean?            @default(false)
+  is_l2_approved      Boolean?            @default(false)
+  is_rejected         Boolean?            @default(false)
+  rejection_reason    String?             @db.VarChar(500)
   mst_materials       mst_materials       @relation(fields: [material_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "purchase_order_items_material_id_fkey")
   txn_purchase_orders txn_purchase_orders @relation(fields: [po_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "purchase_order_items_po_id_fkey")
 }
 
 model txn_purchase_orders {
-  id                       Int                        @id(map: "purchase_orders_pkey") @default(autoincrement())
-  po_no                    String                     @unique(map: "purchase_orders_po_no_key") @db.VarChar(30)
-  vendor_id                Int
-  version                  Int?                       @default(1)
-  subtotal                 Decimal                    @db.Decimal(14, 4)
-  gst_amount               Decimal?                   @db.Decimal(14, 4)
-  total_amount             Decimal                    @db.Decimal(14, 4)
-  issued_date              DateTime?                  @db.Timestamptz(6)
-  created_at               DateTime?                  @default(now()) @db.Timestamptz(6)
-  updated_at               DateTime?                  @db.Timestamptz(6)
-  currency_id              Int?
-  exchange_rate            Decimal?                   @db.Decimal(18, 4)
-  base_currency_amount     Decimal?                   @db.Decimal(14, 4)
-  freight                  Decimal?                   @db.Decimal(14, 4)
-  packing                  Decimal?                   @db.Decimal(14, 4)
-  other_charges            Decimal?                   @db.Decimal(14, 4)
-  remarks                  String?                    @db.VarChar(200)
-  payment_terms            String?                    @db.VarChar(30)
-  shipping_address         String?                    @db.VarChar(200)
-  expected_delivery        DateTime?                  @db.Timestamptz(6)
-  type                     Int?
-  billing_address          String?                    @db.VarChar(200)
-  l1_approval_required     Boolean?
-  l2_approval_req          Boolean?
-  l1_approved              Boolean?
-  l1_approved_at           DateTime?                  @db.Timestamptz(6)
-  l2_approved              Boolean?
-  l2_approved_at           Boolean?
-  txn_purchase_order_items txn_purchase_order_items[]
-  mst_currencies           mst_currencies?            @relation(fields: [currency_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "purchase_orders_currency_id_fkey")
-  mst_vendors              mst_vendors                @relation(fields: [vendor_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "purchase_orders_vendor_id_fkey")
+  id                        Int                        @id(map: "purchase_orders_pkey") @default(autoincrement())
+  po_no                     String                     @unique(map: "purchase_orders_po_no_key") @db.VarChar(30)
+  vendor_id                 Int
+  version                   Int?                       @default(1)
+  subtotal                  Decimal                    @db.Decimal(14, 4)
+  gst_amount                Decimal?                   @db.Decimal(14, 4)
+  total_amount              Decimal                    @db.Decimal(14, 4)
+  issued_date               DateTime?                  @db.Timestamptz(6)
+  created_at                DateTime?                  @default(now()) @db.Timestamptz(6)
+  updated_at                DateTime?                  @db.Timestamptz(6)
+  currency_id               Int?
+  exchange_rate             Decimal?                   @db.Decimal(18, 4)
+  base_currency_amount      Decimal?                   @db.Decimal(14, 4)
+  freight                   Decimal?                   @db.Decimal(14, 4)
+  packing                   Decimal?                   @db.Decimal(14, 4)
+  other_charges             Decimal?                   @db.Decimal(14, 4)
+  remarks                   String?                    @db.VarChar(200)
+  payment_terms             String?                    @db.VarChar(30)
+  shipping_address          String?                    @db.VarChar(200)
+  expected_delivery         DateTime?                  @db.Timestamptz(6)
+  type                      Int?
+  billing_address           String?                    @db.VarChar(200)
+  l1_approval_required      Boolean?
+  l2_approval_req           Boolean?
+  l1_approved               Boolean?
+  l1_approved_at            DateTime?                  @db.Timestamptz(6)
+  l2_approved               Boolean?
+  l2_approved_at            Boolean?
+  status_id                 Int?
+  txn_purchase_order_items  txn_purchase_order_items[]
+  txn_purchase_order_terms  txn_purchase_order_terms[]
+  mst_purchase_order_status mst_purchase_order_status? @relation(fields: [status_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_purchase_order_status")
+  mst_currencies            mst_currencies?            @relation(fields: [currency_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "purchase_orders_currency_id_fkey")
+  mst_vendors               mst_vendors                @relation(fields: [vendor_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "purchase_orders_vendor_id_fkey")
 }
 
 model txn_stock_summary {
@@ -293,13 +300,56 @@ model txn_approved_indent_materials {
 }
 
 model txn_approval_rules {
-  id              BigInt    @id @default(autoincrement())
-  module          String    @db.VarChar(100)
-  rule_name       String    @db.VarChar(255)
-  priority        Int       @default(1)
-  enabled         Boolean   @default(true)
-  conditions      Json
-  actions         Json
-  created_at      DateTime  @default(now()) @db.Timestamp(6)
-  updated_at      DateTime? @default(now()) @db.Timestamp(6)
+  id         BigInt    @id @default(autoincrement())
+  module     String    @db.VarChar(100)
+  rule_name  String    @db.VarChar(255)
+  priority   Int       @default(1)
+  enabled    Boolean   @default(true)
+  conditions Json
+  actions    Json
+  created_at DateTime  @default(now()) @db.Timestamp(6)
+  updated_at DateTime? @default(now()) @db.Timestamp(6)
+}
+
+model mst_purchase_order_status {
+  id                  Int                   @id @default(autoincrement())
+  code_id             Int?
+  code                String                @db.VarChar(200)
+  description         String                @db.VarChar(200)
+  txn_purchase_orders txn_purchase_orders[]
+}
+
+model mst_company_settings {
+  id           Int       @id @default(autoincrement())
+  company_name String?   @db.VarChar(255)
+  address      String?
+  phone        String?   @db.VarChar(50)
+  email        String?   @db.VarChar(255)
+  gst_number   String?   @db.VarChar(50)
+  logo_path    String?
+  created_at   DateTime? @default(now()) @db.Timestamp(6)
+  updated_at   DateTime? @default(now()) @db.Timestamp(6)
+}
+
+model mst_po_terms {
+  id                       Int                        @id @default(autoincrement())
+  title                    String                     @db.VarChar(255)
+  content                  String
+  display_order            Int?                       @default(0)
+  enabled                  Boolean?                   @default(true)
+  created_at               DateTime?                  @default(now()) @db.Timestamp(6)
+  updated_at               DateTime?                  @default(now()) @db.Timestamp(6)
+  txn_purchase_order_terms txn_purchase_order_terms[]
+}
+
+model txn_purchase_order_terms {
+  id                  Int                 @id @default(autoincrement())
+  po_id               Int
+  term_title          String?             @db.VarChar(255)
+  term_context        String
+  display_order       Int
+  created_at          DateTime?           @default(now()) @db.Timestamp(6)
+  term_id             Int?
+  txn_purchase_orders txn_purchase_orders @relation(fields: [po_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_terms_po")
+  mst_po_terms        mst_po_terms?       @relation(fields: [term_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_terms_po_terms")
 }

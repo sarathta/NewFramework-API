@@ -36,6 +36,9 @@ const vendorSelect = {
 
 const purchaseOrderInclude = {
     txn_purchase_order_items: true,
+    txn_purchase_order_terms: {
+        orderBy: { display_order: "asc" },
+    },
     mst_vendors: { select: vendorSelect },
     mst_currencies: {
         select: {
@@ -275,6 +278,71 @@ function mapPoItems(items) {
     }));
 }
 
+function normalizeTermIds(termIds) {
+    if (termIds === undefined || termIds === null) {
+        return undefined;
+    }
+
+    if (!Array.isArray(termIds)) {
+        const error = new Error("term_ids must be an array");
+        error.statusCode = 400;
+        throw error;
+    }
+
+    return [...new Set(termIds.map((id) => Number(id)).filter((id) => !Number.isNaN(id)))];
+}
+
+async function validatePoTerms(termIds) {
+    if (!termIds || termIds.length === 0) {
+        return [];
+    }
+
+    const terms = await prisma.mst_po_terms.findMany({
+        where: { id: { in: termIds } },
+        orderBy: [{ display_order: "asc" }, { id: "asc" }],
+    });
+
+    if (terms.length !== termIds.length) {
+        const error = new Error("One or more PO terms not found");
+        error.statusCode = 404;
+        throw error;
+    }
+
+    const termsById = new Map(terms.map((term) => [term.id, term]));
+    return termIds.map((id) => termsById.get(id));
+}
+
+function mapPoTermsCreate(masterTerms = []) {
+    return masterTerms.map((term, index) => ({
+        term_id: term.id,
+        term_title: term.title,
+        term_context: term.content,
+        display_order:
+            term.display_order !== undefined && term.display_order !== null
+                ? Number(term.display_order)
+                : index + 1,
+    }));
+}
+
+async function syncPurchaseOrderTerms(tx, poId, termIds) {
+    await tx.txn_purchase_order_terms.deleteMany({
+        where: { po_id: Number(poId) },
+    });
+
+    if (!termIds || termIds.length === 0) {
+        return;
+    }
+
+    const masterTerms = await validatePoTerms(termIds);
+
+    await tx.txn_purchase_order_terms.createMany({
+        data: mapPoTermsCreate(masterTerms).map((term) => ({
+            ...term,
+            po_id: Number(poId),
+        })),
+    });
+}
+
 function parseOptionalDate(value) {
     return value ? new Date(value) : null;
 }
@@ -295,11 +363,20 @@ function formatPurchaseOrder(po) {
         mst_vendors,
         mst_currencies,
         txn_purchase_order_items,
+        txn_purchase_order_terms,
         subtotal,
         gst_amount,
         issued_date,
         ...poData
     } = po;
+
+    const terms = (txn_purchase_order_terms ?? []).map((term) => ({
+        id: term.id,
+        term_id: term.term_id,
+        title: term.term_title,
+        content: term.term_context,
+        display_order: term.display_order,
+    }));
 
     return {
         ...poData,
@@ -310,6 +387,8 @@ function formatPurchaseOrder(po) {
         po_date: issued_date,
         vendor: mst_vendors,
         currency: mst_currencies,
+        term_ids: terms.map((term) => term.term_id).filter((id) => id != null),
+        terms,
         items: txn_purchase_order_items.map(({ qty, ...item }) => ({
             ...item,
             qty,
@@ -387,6 +466,11 @@ async function validatePurchaseOrderPayload(payload) {
 
     await validateMaterials(payload.items);
     await validateApprovedMaterials(payload.items);
+
+    const termIds = normalizeTermIds(payload.term_ids);
+    if (termIds !== undefined) {
+        await validatePoTerms(termIds);
+    }
 }
 
 async function resolvePurchaseOrderApprovalFields(poType, payload, userContext = {}) {
@@ -420,19 +504,30 @@ async function createPurchaseOrder(payload, type, userContext = {}) {
         payload,
         userContext
     );
+    const termIds = normalizeTermIds(payload.term_ids);
     const prefix = poType === PO_TYPE_DRAFT ? "DRF" : "PO";
     const poNo = await generatePoNo(prefix);
 
-    const purchaseOrder = await prisma.txn_purchase_orders.create({
-        data: {
-            ...fields,
-            ...approvalFields,
-            po_no: poNo,
-            txn_purchase_order_items: {
-                create: mapPoItems(payload.items),
+    const purchaseOrder = await prisma.$transaction(async (tx) => {
+        const created = await tx.txn_purchase_orders.create({
+            data: {
+                ...fields,
+                ...approvalFields,
+                po_no: poNo,
+                txn_purchase_order_items: {
+                    create: mapPoItems(payload.items),
+                },
             },
-        },
-        include: purchaseOrderInclude,
+        });
+
+        if (termIds !== undefined) {
+            await syncPurchaseOrderTerms(tx, created.id, termIds);
+        }
+
+        return tx.txn_purchase_orders.findUnique({
+            where: { id: created.id },
+            include: purchaseOrderInclude,
+        });
     });
 
     return formatPurchaseOrder(purchaseOrder);
@@ -461,6 +556,8 @@ async function updatePurchaseOrder(id, payload, userContext = {}) {
         userContext
     );
 
+    const termIds = normalizeTermIds(payload.term_ids);
+
     let poNo = existing.po_no;
     if (existing.type === PO_TYPE_DRAFT && poType === PO_TYPE_ORDER) {
         poNo = await generatePoNo("PO");
@@ -471,7 +568,7 @@ async function updatePurchaseOrder(id, payload, userContext = {}) {
             where: { po_id: poId },
         });
 
-        return tx.txn_purchase_orders.update({
+        const updated = await tx.txn_purchase_orders.update({
             where: { id: poId },
             data: {
                 ...fields,
@@ -482,6 +579,14 @@ async function updatePurchaseOrder(id, payload, userContext = {}) {
                     create: mapPoItems(payload.items),
                 },
             },
+        });
+
+        if (termIds !== undefined) {
+            await syncPurchaseOrderTerms(tx, updated.id, termIds);
+        }
+
+        return tx.txn_purchase_orders.findUnique({
+            where: { id: updated.id },
             include: purchaseOrderInclude,
         });
     });
@@ -506,6 +611,42 @@ async function getPurchaseOrders() {
     });
 
     return purchaseOrders.map(formatPurchaseOrder);
+}
+
+async function deletePurchaseOrder(id) {
+    const poId = Number(id);
+
+    const purchaseOrder = await prisma.txn_purchase_orders.findUnique({
+        where: { id: poId },
+        include: purchaseOrderInclude,
+    });
+
+    if (!purchaseOrder) {
+        const error = new Error("Purchase order not found");
+        error.statusCode = 404;
+        throw error;
+    }
+
+    await prisma.$transaction(async (tx) => {
+        await tx.txn_approved_indent_materials.updateMany({
+            where: { po_id: poId },
+            data: { po_id: null, po_no: null },
+        });
+
+        await tx.txn_purchase_order_terms.deleteMany({
+            where: { po_id: poId },
+        });
+
+        await tx.txn_purchase_order_items.deleteMany({
+            where: { po_id: poId },
+        });
+
+        await tx.txn_purchase_orders.delete({
+            where: { id: poId },
+        });
+    });
+
+    return formatPurchaseOrder(purchaseOrder);
 }
 
 async function getVendorsByMaterialIds(materialIds) {
@@ -733,6 +874,7 @@ module.exports = {
     createPurchaseOrder: (payload, userContext) =>
         createPurchaseOrder(payload, PO_TYPE_ORDER, userContext),
     updatePurchaseOrder,
+    deletePurchaseOrder,
     getDrafts: () => getPurchaseOrdersByType(PO_TYPE_DRAFT),
     getPurchaseOrders,
 };
