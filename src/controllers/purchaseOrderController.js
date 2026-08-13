@@ -76,6 +76,23 @@ router.post("/", async (req, res, next) => {
     }
 });
 
+router.put("/:id/approve", async (req, res, next) => {
+    try {
+        const purchaseOrder = await purchaseOrderService.approvePurchaseOrder(
+            req.params.id,
+            req.user.id,
+            req.user.role_id
+        );
+        return res.status(200).json({
+            status: 200,
+            message: "Purchase order approved successfully",
+            data: purchaseOrder,
+        });
+    } catch (error) {
+        return handleServiceError(error, res, next);
+    }
+});
+
 router.put("/:id", async (req, res, next) => {
     try {
         const purchaseOrder = await purchaseOrderService.updatePurchaseOrder(

@@ -3,7 +3,18 @@ const {
     STATUS_L1_L2_APPROVED_CODE_ID,
     PO_TYPE_DRAFT,
     PO_TYPE_ORDER,
+    PO_STATUS_L1_APPROVAL_PENDING_CODE_ID,
+    PO_STATUS_L2_APPROVAL_PENDING_CODE_ID,
+    PO_STATUS_GENERATED_CODE_ID,
+    PO_STATUS_REJECTED_CODE_ID,
+    PO_STATUS_DRAFT_CODE_ID,
 } = require("../config/status.config");
+const {
+    ROLE_L1_APPROVER,
+    ROLE_L2_APPROVER,
+    isAdministrator,
+    isApprover,
+} = require("../config/roles.config");
 const { APPROVAL_MODULE_PURCHASE_ORDER } = require("../config/approval-modules.config");
 const { evaluateApprovalRequirements } = require("./approval-rule-evaluator.service");
 
@@ -47,6 +58,9 @@ const purchaseOrderInclude = {
             currency_name: true,
             currency_symbol: true,
         },
+    },
+    mst_purchase_order_status: {
+        select: { id: true, code: true, code_id: true, description: true },
     },
 };
 
@@ -364,6 +378,7 @@ function formatPurchaseOrder(po) {
         mst_currencies,
         txn_purchase_order_items,
         txn_purchase_order_terms,
+        mst_purchase_order_status,
         subtotal,
         gst_amount,
         issued_date,
@@ -387,6 +402,14 @@ function formatPurchaseOrder(po) {
         po_date: issued_date,
         vendor: mst_vendors,
         currency: mst_currencies,
+        status: mst_purchase_order_status
+            ? {
+                  id: mst_purchase_order_status.id,
+                  code: mst_purchase_order_status.code,
+                  code_id: mst_purchase_order_status.code_id,
+                  description: mst_purchase_order_status.description,
+              }
+            : null,
         term_ids: terms.map((term) => term.term_id).filter((id) => id != null),
         terms,
         items: txn_purchase_order_items.map(({ qty, ...item }) => ({
@@ -473,11 +496,58 @@ async function validatePurchaseOrderPayload(payload) {
     }
 }
 
+async function getPoStatusIdByCodeId(codeId, notFoundMessage) {
+    const status = await prisma.mst_purchase_order_status.findFirst({
+        where: { code_id: Number(codeId) },
+        select: { id: true },
+    });
+
+    if (!status) {
+        const error = new Error(notFoundMessage || "Purchase order status not found");
+        error.statusCode = 404;
+        throw error;
+    }
+
+    return status.id;
+}
+
+function resolvePoStatusCodeId({
+    l1_approval_required,
+    l2_approval_required,
+    l1_approved,
+    l2_approved,
+}) {
+    const l1Required = Boolean(l1_approval_required);
+    const l2Required = Boolean(l2_approval_required);
+    const l1Approved = Boolean(l1_approved);
+    const l2Approved = Boolean(l2_approved);
+
+    if ((!l1Required || l1Approved) && (!l2Required || l2Approved)) {
+        return PO_STATUS_GENERATED_CODE_ID;
+    }
+
+    if (l2Required && !l2Approved && (!l1Required || l1Approved)) {
+        return PO_STATUS_L2_APPROVAL_PENDING_CODE_ID;
+    }
+
+    if (l1Required && !l1Approved) {
+        return PO_STATUS_L1_APPROVAL_PENDING_CODE_ID;
+    }
+
+    return PO_STATUS_GENERATED_CODE_ID;
+}
+
 async function resolvePurchaseOrderApprovalFields(poType, payload, userContext = {}) {
     if (poType !== PO_TYPE_ORDER) {
         return {
             l1_approval_required: false,
-            l2_approval_req: false,
+            l2_approval_required: false,
+            l1_approved: false,
+            l2_approved: false,
+            status_id: await getPoStatusIdByCodeId(
+                PO_STATUS_DRAFT_CODE_ID,
+                "Draft purchase order status not found"
+            ),
         };
     }
 
@@ -489,10 +559,25 @@ async function resolvePurchaseOrderApprovalFields(poType, payload, userContext =
         totalAmount: payload.total_amount ?? getPayloadSubtotal(payload),
     });
 
-    return {
-        l1_approval_required: approvalRequirements.l1ApprovalRequired,
-        l2_approval_req: approvalRequirements.l2ApprovalRequired,
+    const l1ApprovalRequired = Boolean(approvalRequirements.l1ApprovalRequired);
+    const l2ApprovalRequired = Boolean(approvalRequirements.l2ApprovalRequired);
+    const l1Approved = !l1ApprovalRequired;
+    const l2Approved = !l2ApprovalRequired;
+
+    const approvalFields = {
+        l1_approval_required: l1ApprovalRequired,
+        l2_approval_required: l2ApprovalRequired,
+        l1_approved: l1Approved,
+        l2_approved: l2Approved,
     };
+
+    const statusCodeId = resolvePoStatusCodeId(approvalFields);
+    approvalFields.status_id = await getPoStatusIdByCodeId(
+        statusCodeId,
+        "Purchase order status not found"
+    );
+
+    return approvalFields;
 }
 
 async function createPurchaseOrder(payload, type, userContext = {}) {
@@ -592,6 +677,171 @@ async function updatePurchaseOrder(id, payload, userContext = {}) {
     });
 
     return formatPurchaseOrder(purchaseOrder);
+}
+
+function ensurePoApproverRole(roleId) {
+    if (!isApprover(roleId)) {
+        const error = new Error("Only approvers can perform this action");
+        error.statusCode = 403;
+        throw error;
+    }
+}
+
+function resolvePoApprovalLevelForRole(po, roleId) {
+    if (roleId === ROLE_L1_APPROVER) {
+        if (po.l1_approved) {
+            const error = new Error("Purchase order is already L1 approved");
+            error.statusCode = 409;
+            throw error;
+        }
+
+        if (!po.l1_approval_required) {
+            const error = new Error("L1 approval is not required for this purchase order");
+            error.statusCode = 409;
+            throw error;
+        }
+
+        return "l1";
+    }
+
+    if (roleId === ROLE_L2_APPROVER) {
+        if (!po.l1_approved) {
+            const error = new Error("L1 approval is required before L2 approval");
+            error.statusCode = 409;
+            throw error;
+        }
+
+        if (po.l2_approved) {
+            const error = new Error("Purchase order is already L2 approved");
+            error.statusCode = 409;
+            throw error;
+        }
+
+        if (!po.l2_approval_required) {
+            const error = new Error("L2 approval is not required for this purchase order");
+            error.statusCode = 409;
+            throw error;
+        }
+
+        return "l2";
+    }
+
+    const error = new Error("Only approvers can perform this action");
+    error.statusCode = 403;
+    throw error;
+}
+
+async function isPurchaseOrderAdministrator(userId, roleId) {
+    if (isAdministrator(roleId)) {
+        return true;
+    }
+
+    const employee = await prisma.mst_employees.findUnique({
+        where: { id: Number(userId) },
+        select: {
+            mst_user_roles: { select: { role_name: true } },
+        },
+    });
+
+    return isAdministrator(roleId, employee?.mst_user_roles?.role_name);
+}
+
+async function approvePurchaseOrder(id, userId, roleId) {
+    const poId = Number(id);
+    const isAdmin = await isPurchaseOrderAdministrator(userId, roleId);
+
+    if (!isAdmin) {
+        ensurePoApproverRole(roleId);
+    }
+
+    const purchaseOrder = await prisma.txn_purchase_orders.findUnique({
+        where: { id: poId },
+        include: {
+            mst_purchase_order_status: { select: { code_id: true } },
+        },
+    });
+
+    if (!purchaseOrder) {
+        const error = new Error("Purchase order not found");
+        error.statusCode = 404;
+        throw error;
+    }
+
+    if (purchaseOrder.type === PO_TYPE_DRAFT) {
+        const error = new Error("Cannot approve a draft purchase order");
+        error.statusCode = 409;
+        throw error;
+    }
+
+    if (purchaseOrder.mst_purchase_order_status?.code_id === PO_STATUS_REJECTED_CODE_ID) {
+        const error = new Error("Cannot approve a rejected purchase order");
+        error.statusCode = 409;
+        throw error;
+    }
+
+    const now = new Date();
+    const updateData = {
+        updated_at: now,
+    };
+
+    let nextApprovalState = {
+        l1_approval_required: purchaseOrder.l1_approval_required,
+        l2_approval_required: purchaseOrder.l2_approval_required,
+        l1_approved: Boolean(purchaseOrder.l1_approved),
+        l2_approved: Boolean(purchaseOrder.l2_approved),
+    };
+
+    if (isAdmin) {
+        const pendingL1 = purchaseOrder.l1_approval_required && !purchaseOrder.l1_approved;
+        const pendingL2 = purchaseOrder.l2_approval_required && !purchaseOrder.l2_approved;
+
+        if (!pendingL1 && !pendingL2) {
+            const error = new Error("No approval is pending for this purchase order");
+            error.statusCode = 409;
+            throw error;
+        }
+
+        if (pendingL1) {
+            updateData.l1_approved = true;
+            updateData.l1_approved_at = now;
+            nextApprovalState.l1_approved = true;
+        }
+
+        if (pendingL2) {
+            updateData.l2_approved = true;
+            updateData.l2_approved_at = true;
+            nextApprovalState.l2_approved = true;
+        }
+    } else {
+        const approvalLevel = resolvePoApprovalLevelForRole(purchaseOrder, roleId);
+
+        if (approvalLevel === "l1") {
+            updateData.l1_approved = true;
+            updateData.l1_approved_at = now;
+            nextApprovalState.l1_approved = true;
+        } else {
+            updateData.l2_approved = true;
+            updateData.l2_approved_at = true;
+            nextApprovalState.l2_approved = true;
+        }
+    }
+
+    updateData.status_id = await getPoStatusIdByCodeId(
+        resolvePoStatusCodeId(nextApprovalState),
+        "Purchase order status not found"
+    );
+
+    await prisma.txn_purchase_orders.update({
+        where: { id: poId },
+        data: updateData,
+    });
+
+    const updated = await prisma.txn_purchase_orders.findUnique({
+        where: { id: poId },
+        include: purchaseOrderInclude,
+    });
+
+    return formatPurchaseOrder(updated);
 }
 
 async function getPurchaseOrdersByType(type) {
@@ -874,6 +1124,7 @@ module.exports = {
     createPurchaseOrder: (payload, userContext) =>
         createPurchaseOrder(payload, PO_TYPE_ORDER, userContext),
     updatePurchaseOrder,
+    approvePurchaseOrder,
     deletePurchaseOrder,
     getDrafts: () => getPurchaseOrdersByType(PO_TYPE_DRAFT),
     getPurchaseOrders,

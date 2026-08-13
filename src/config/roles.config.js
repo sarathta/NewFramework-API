@@ -2,8 +2,13 @@ const ROLE_ADMINISTRATOR = 1;
 const ROLE_L1_APPROVER = 2;
 const ROLE_L2_APPROVER = 5;
 
-function isAdministrator(roleId) {
-    return Number(roleId) === ROLE_ADMINISTRATOR;
+function isAdministrator(roleId, roleName) {
+    if (Number(roleId) === ROLE_ADMINISTRATOR) {
+        return true;
+    }
+
+    const name = String(roleName ?? "").trim().toLowerCase();
+    return name === "administrator" || name === "admin";
 }
 
 function isApprover(roleId) {
