@@ -8,11 +8,7 @@ router.use(authMiddleware);
 router.get("/", async (req, res, next) => {
     try {
         const materialIssues = await materialIssueService.getMaterialIssueIndents();
-        return res.status(200).json({
-            status: 200,
-            message: "Material issue indents fetched successfully",
-            data: materialIssues,
-        });
+        return res.status(200).json(materialIssues);
     } catch (error) {
         next(error);
     }
@@ -20,7 +16,7 @@ router.get("/", async (req, res, next) => {
 
 router.post("/:id/issue", async (req, res, next) => {
     try {
-        const result = await materialIssueService.issueMaterial(req.params.id);
+        const result = await materialIssueService.issueMaterial(req.params.id, req.body);
         return res.status(200).json({
             status: 200,
             message: "Material issued successfully",

@@ -147,21 +147,23 @@ model mst_vendors {
 }
 
 model txn_indent_items {
-  id               Int           @id(map: "indent_items_pkey") @default(autoincrement())
-  indent_id        Int
-  material_id      Int
-  quantity         Decimal       @db.Decimal(14, 3)
-  unit_price       Decimal       @db.Decimal(14, 2)
-  material_code    String        @db.VarChar(50)
-  description      String        @db.VarChar(500)
-  uom              String        @db.VarChar(20)
-  gst_rate         Decimal       @db.Decimal(5, 2)
-  is_l1_approved   Boolean?      @default(false)
-  is_l2_approved   Boolean?      @default(false)
-  is_rejected      Boolean?      @default(false)
-  rejection_reason String?       @db.VarChar(500)
-  txn_indents      txn_indents   @relation(fields: [indent_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_indent_item_indent")
-  mst_materials    mst_materials @relation(fields: [material_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_indent_item_material")
+  id                Int           @id(map: "indent_items_pkey") @default(autoincrement())
+  indent_id         Int
+  material_id       Int
+  quantity          Decimal       @db.Decimal(14, 3)
+  unit_price        Decimal       @db.Decimal(14, 2)
+  material_code     String        @db.VarChar(50)
+  description       String        @db.VarChar(500)
+  uom               String        @db.VarChar(20)
+  gst_rate          Decimal       @db.Decimal(5, 2)
+  is_l1_approved    Boolean?      @default(false)
+  is_l2_approved    Boolean?      @default(false)
+  is_rejected       Boolean?      @default(false)
+  rejection_reason  String?       @db.VarChar(500)
+  issued_quantity   Decimal?      @db.Decimal(14, 3)
+  is_issue_rejected Boolean?      @default(false)
+  txn_indents       txn_indents   @relation(fields: [indent_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_indent_item_indent")
+  mst_materials     mst_materials @relation(fields: [material_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_indent_item_material")
 }
 
 model txn_indents {
