@@ -863,6 +863,190 @@ async function getPurchaseOrders() {
     return purchaseOrders.map(formatPurchaseOrder);
 }
 
+async function getApprovedPurchaseOrders() {
+    const purchaseOrders = await prisma.txn_purchase_orders.findMany({
+        where: { status_id: 5 },
+        include: {
+            ...purchaseOrderInclude,
+            txn_purchase_order_items: {
+                orderBy: { id: "asc" },
+            },
+        },
+        orderBy: { created_at: "desc" },
+    });
+
+    if (purchaseOrders.length === 0) {
+        return [];
+    }
+
+    const poItemIds = purchaseOrders.flatMap((po) =>
+        po.txn_purchase_order_items.map((item) => item.id)
+    );
+
+    const previousQuantityByPoItemId = await getPreviousReceivedQuantitiesByPoItemIds(
+        poItemIds
+    );
+
+    return purchaseOrders.map((po) =>
+        formatApprovedPurchaseOrder(po, previousQuantityByPoItemId)
+    );
+}
+
+function toNumeric(value) {
+    if (value === null || value === undefined) {
+        return 0;
+    }
+    if (typeof value === "bigint") {
+        return Number(value);
+    }
+    if (typeof value?.toNumber === "function") {
+        return value.toNumber();
+    }
+    return Number(value) || 0;
+}
+
+async function getPreviousReceivedQuantitiesByPoItemIds(poItemIds) {
+    const previousQuantityByPoItemId = new Map();
+
+    if (!poItemIds || poItemIds.length === 0) {
+        return previousQuantityByPoItemId;
+    }
+
+    const grnItems = await prisma.txn_grn_items.findMany({
+        where: {
+            po_item_id: { in: poItemIds },
+        },
+        select: {
+            po_item_id: true,
+            accepted_quantity: true,
+        },
+    });
+
+    for (const item of grnItems) {
+        const poItemId = Number(item.po_item_id);
+        const acceptedQuantity = toNumeric(item.accepted_quantity);
+        previousQuantityByPoItemId.set(
+            poItemId,
+            (previousQuantityByPoItemId.get(poItemId) ?? 0) + acceptedQuantity
+        );
+    }
+
+    return previousQuantityByPoItemId;
+}
+
+function formatApprovedPurchaseOrder(po, previousQuantityByPoItemId = new Map()) {
+    const {
+        mst_vendors,
+        mst_currencies,
+        txn_purchase_order_items,
+        txn_purchase_order_terms,
+        mst_purchase_order_status,
+        subtotal,
+        gst_amount,
+        total_amount,
+        freight,
+        packing,
+        other_charges,
+        exchange_rate,
+        base_currency_amount,
+        issued_date,
+        expected_delivery,
+        created_at,
+        updated_at,
+        remarks,
+        payment_terms,
+        shipping_address,
+        billing_address,
+        vendor_id,
+        currency_id,
+        status_id,
+        type,
+        version,
+        po_no,
+        id,
+        l1_approval_required,
+        l2_approval_required,
+        l1_approved,
+        l1_approved_at,
+        l2_approved,
+        l2_approved_at,
+    } = po;
+
+    const terms = (txn_purchase_order_terms ?? []).map((term) => ({
+        id: term.id,
+        term_id: term.term_id,
+        title: term.term_title,
+        content: term.term_context,
+        display_order: term.display_order,
+    }));
+
+    const items = (txn_purchase_order_items ?? []).map((item) => {
+        const quantity = toNumeric(item.qty);
+        const previousQuantity = previousQuantityByPoItemId.get(item.id) ?? 0;
+        const balanceQuantity = quantity - previousQuantity;
+
+        return {
+            id: item.id,
+            material_id: item.material_id,
+            material_code: item.material_code,
+            description: item.description,
+            uom: item.uom,
+            unit_price: toNumeric(item.unit_price),
+            gst_rate: toNumeric(item.gst_rate),
+            quantity,
+            qty: quantity,
+            previous_quantity: previousQuantity,
+            balance_quantity: balanceQuantity < 0 ? 0 : balanceQuantity,
+        };
+    });
+
+    return {
+        id,
+        po_no,
+        type,
+        version,
+        vendor_id,
+        currency_id,
+        status_id,
+        issued_date,
+        po_date: issued_date,
+        expected_delivery,
+        payment_terms,
+        billing_address,
+        shipping_address,
+        remarks,
+        freight: toNumeric(freight),
+        packing: toNumeric(packing),
+        other_charges: toNumeric(other_charges),
+        exchange_rate: toNumeric(exchange_rate),
+        base_currency_amount: toNumeric(base_currency_amount),
+        subtotal: toNumeric(subtotal),
+        sub_total: toNumeric(subtotal),
+        gst_amount: toNumeric(gst_amount),
+        total_amount: toNumeric(total_amount),
+        l1_approval_required,
+        l2_approval_required,
+        l1_approved,
+        l1_approved_at,
+        l2_approved,
+        l2_approved_at,
+        created_at,
+        updated_at,
+        vendor: mst_vendors,
+        currency: mst_currencies,
+        status: mst_purchase_order_status
+            ? {
+                  id: mst_purchase_order_status.id,
+                  code: mst_purchase_order_status.code,
+                  code_id: mst_purchase_order_status.code_id,
+                  description: mst_purchase_order_status.description,
+              }
+            : null,
+        terms,
+        items,
+    };
+}
+
 async function deletePurchaseOrder(id) {
     const poId = Number(id);
 
@@ -1128,4 +1312,5 @@ module.exports = {
     deletePurchaseOrder,
     getDrafts: () => getPurchaseOrdersByType(PO_TYPE_DRAFT),
     getPurchaseOrders,
+    getApprovedPurchaseOrders,
 };

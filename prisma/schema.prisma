@@ -211,6 +211,7 @@ model txn_purchase_order_items {
   is_l2_approved      Boolean?            @default(false)
   is_rejected         Boolean?            @default(false)
   rejection_reason    String?             @db.VarChar(500)
+  is_completed        Boolean?            @default(false)
   txn_grn_items       txn_grn_items[]
   mst_materials       mst_materials       @relation(fields: [material_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "purchase_order_items_material_id_fkey")
   txn_purchase_orders txn_purchase_orders @relation(fields: [po_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "purchase_order_items_po_id_fkey")
@@ -390,28 +391,39 @@ model txn_grn_items {
 }
 
 model txn_grns {
-  id                   BigInt                @id @default(autoincrement())
-  grn_number           String                @unique @db.VarChar(50)
-  po_id                BigInt
-  vendor_id            BigInt
-  gate_entry_date      DateTime              @default(now()) @db.Timestamp(6)
-  vehicle_no           String?               @db.VarChar(50)
-  driver_name          String?               @db.VarChar(150)
-  gate_received_by     BigInt?
-  invoice_no           String?               @db.VarChar(100)
-  invoice_date         DateTime?             @db.Date
-  invoice_amount       Decimal?              @db.Decimal(18, 2)
-  taxable_amount       Decimal?              @db.Decimal(18, 2)
-  gst_amount           Decimal?              @db.Decimal(18, 2)
-  eway_bill_no         String?               @db.VarChar(100)
-  invoice_confirmed_by BigInt?
-  invoice_confirmed_at DateTime?             @db.Timestamp(6)
-  status_id            Int?
-  remarks              String?
-  created_by           BigInt?
-  created_at           DateTime              @default(now()) @db.Timestamp(6)
-  updated_by           BigInt?
-  updated_at           DateTime              @default(now()) @db.Timestamp(6)
-  txn_grn_attachments  txn_grn_attachments[]
-  txn_grn_items        txn_grn_items[]
+  id                    BigInt                @id @default(autoincrement())
+  grn_number            String                @unique @db.VarChar(50)
+  po_id                 BigInt
+  vendor_id             BigInt
+  gate_entry_date       DateTime              @default(now()) @db.Timestamp(6)
+  vehicle_no            String?               @db.VarChar(50)
+  driver_name           String?               @db.VarChar(150)
+  gate_received_by      BigInt?
+  invoice_no            String?               @db.VarChar(100)
+  invoice_date          DateTime?             @db.Date
+  invoice_amount        Decimal?              @db.Decimal(18, 2)
+  taxable_amount        Decimal?              @db.Decimal(18, 2)
+  gst_amount            Decimal?              @db.Decimal(18, 2)
+  eway_bill_no          String?               @db.VarChar(100)
+  invoice_confirmed_by  BigInt?
+  invoice_confirmed_at  DateTime?             @db.Timestamp(6)
+  status_id             Int?
+  remarks               String?
+  created_by            BigInt?
+  created_at            DateTime              @default(now()) @db.Timestamp(6)
+  updated_by            BigInt?
+  updated_at            DateTime              @default(now()) @db.Timestamp(6)
+  type                  Int?
+  is_phase_two_required Boolean?
+  txn_grn_attachments   txn_grn_attachments[]
+  txn_grn_items         txn_grn_items[]
+  mst_grns_status       mst_grns_status?      @relation(fields: [status_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_grns_status")
+}
+
+model mst_grns_status {
+  id          Int        @id @default(autoincrement())
+  code_id     Int?
+  code        String     @unique @db.VarChar(200)
+  description String     @unique @db.VarChar(200)
+  txn_grns    txn_grns[]
 }

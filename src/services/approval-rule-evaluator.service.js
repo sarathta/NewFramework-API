@@ -158,6 +158,7 @@ function getDefaultApprovalRequirements() {
         l1ApprovalRequired: false,
         l2ApprovalRequired: false,
         matchedRule: false,
+        hasEnabledRules: false,
         approvalLevels: [],
     };
 }
@@ -188,6 +189,7 @@ async function evaluateApprovalRequirements({
     });
 
     const rules = await getEnabledRulesForModule(module);
+    const hasEnabledRules = rules.length > 0;
 
     for (const rule of rules) {
         const conditions = Array.isArray(rule.conditions) ? rule.conditions : [];
@@ -201,6 +203,7 @@ async function evaluateApprovalRequirements({
 
         return {
             ...mapApprovalLevelsToRequirements(actions.approvalLevels),
+            hasEnabledRules,
             matchedRuleId: Number(rule.id),
             matchedRuleName: rule.rule_name,
             context,
@@ -209,6 +212,7 @@ async function evaluateApprovalRequirements({
 
     return {
         ...getDefaultApprovalRequirements(),
+        hasEnabledRules,
         context,
     };
 }

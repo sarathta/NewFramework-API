@@ -17,6 +17,7 @@ const purchaseOrderController = require('../controllers/purchaseOrderController'
 const vendorMaterialsController = require('../controllers/vendorMaterialsController');
 const systemParameetrsController = require('../controllers/systemParametersController');
 const companySettingsController = require('../controllers/companySettingsController');
+const grnController = require('../controllers/grnController');
 
 // Mount all routes
 router.use('/auth', authController);
@@ -33,5 +34,7 @@ router.use('/purchase-order', purchaseOrderController);
 router.use('/vendor-materials', vendorMaterialsController);
 router.use('/system-parameters', systemParameetrsController);
 router.use('/company-settings', companySettingsController);
+router.use('/grn', grnController);
+router.use('/grns', grnController);
 
 module.exports = router;

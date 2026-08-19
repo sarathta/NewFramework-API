@@ -60,6 +60,15 @@ router.get("/draft", async (req, res, next) => {
     }
 });
 
+router.get("/approved", async (req, res, next) => {
+    try {
+        const purchaseOrders = await purchaseOrderService.getApprovedPurchaseOrders();
+        return res.status(200).json(purchaseOrders);
+    } catch (error) {
+        next(error);
+    }
+});
+
 router.post("/", async (req, res, next) => {
     try {
         const purchaseOrder = await purchaseOrderService.createPurchaseOrder(req.body, {
