@@ -87,8 +87,10 @@ model mst_materials {
   description                      String                             @db.VarChar(500)
   category_id                      Int
   created_at                       DateTime?                          @default(now()) @db.Timestamptz(6)
+  uom_id                           Int?
   mst_inventory_control_thresholds mst_inventory_control_thresholds[]
   mst_material_categories          mst_material_categories            @relation(fields: [category_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_material_category")
+  mst_uoms                         mst_uoms?                          @relation(fields: [uom_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_material_uom")
   mst_vendor_materials             mst_vendor_materials[]
   txn_approved_indent_materials    txn_approved_indent_materials[]
   txn_indent_items                 txn_indent_items[]
@@ -104,10 +106,10 @@ model mst_tax_codes {
 }
 
 model mst_uoms {
-  id                Int                 @id(map: "uoms_pkey") @default(autoincrement())
-  code              String              @unique(map: "uoms_code_key") @db.VarChar(20)
-  name              String              @db.VarChar(100)
-  txn_stock_summary txn_stock_summary[]
+  id            Int             @id(map: "uoms_pkey") @default(autoincrement())
+  code          String          @unique(map: "uoms_code_key") @db.VarChar(20)
+  name          String          @db.VarChar(100)
+  mst_materials mst_materials[]
 }
 
 model mst_user_roles {
@@ -262,12 +264,10 @@ model txn_stock_summary {
   bin_location  String?        @db.VarChar(50)
   stock_qty     Float?         @default(0) @db.Real
   tax_code_id   Int?
-  uom_id        Int?
   created_at    DateTime       @default(now()) @db.Timestamptz(6)
   updated_at    DateTime?      @db.Timestamptz(6)
   mst_materials mst_materials? @relation(fields: [material_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_stock_materials")
   mst_tax_codes mst_tax_codes? @relation(fields: [tax_code_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_stock_tax_code")
-  mst_uoms      mst_uoms?      @relation(fields: [uom_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_stock_uom")
 }
 
 model mst_area {

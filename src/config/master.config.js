@@ -28,12 +28,18 @@ const MASTER_CONFIGS = {
                 include: "mst_material_categories",
                 labelKey: "category_label",
                 labelFn: (row) => row.name,
-            }
+            },
+            uom_id: {
+                include: "mst_uoms",
+                labelKey: "uom_label",
+                labelFn: (row) => row.name,
+            },
         },
         columns: [
             { field: "code", header: "Code" },
             { field: "description", header: "Description" },
-            { field: "category_label", header: "Category", type: "dropdown", displayField: "category_label" }
+            { field: "category_label", header: "Category", type: "dropdown", displayField: "category_label" },
+            { field: "uom_label", header: "UOM", type: "dropdown", displayField: "uom_label" }
         ],
         formFields: [
             { field: "description", label: "Description", type: "textarea", required: true, placeholder: "Enter description" },
@@ -44,10 +50,19 @@ const MASTER_CONFIGS = {
                 required: true,
                 optionsSource: "mst_material_categories",
                 displayField: "category_label",
+            },
+            {
+                field: "uom_id",
+                label: "UOM",
+                type: "dropdown",
+                required: true,
+                optionsSource: "mst_uoms",
+                displayField: "uom_label",
             }
         ],
         optionsConfig: {
-            mst_material_categories: { labelFn: (row) => row.name }
+            mst_material_categories: { labelFn: (row) => row.name },
+            mst_uoms: { labelFn: (row) => row.name }
         },
         hasUpdatedAt: false,
     },

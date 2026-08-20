@@ -1217,7 +1217,11 @@ async function getApprovedMaterials() {
                     code: true,
                     description: true,
                     category_id: true,
+                    uom_id: true,
                     mst_material_categories: {
+                        select: { id: true, code: true, name: true },
+                    },
+                    mst_uoms: {
                         select: { id: true, code: true, name: true },
                     },
                 },
