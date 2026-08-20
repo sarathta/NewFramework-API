@@ -1,12 +1,12 @@
 const express = require("express");
 const cors = require("cors");
-const dotenv = require("dotenv");
-const pool = require("./config/db");
+// const dotenv = require("dotenv");
+// const pool = require("./config/db");
 const errorHandling = require("./middlewares/errorHandler");
 const app_routing = require("./routes/api_routing");
 const { connectDB, disconnectDB } = require("./config/db");
 
-dotenv.config();
+// dotenv.config();
 
 // Connect to Database
 connectDB();
@@ -28,15 +28,15 @@ app.use(errorHandling);
 
 // createUserTable();
 
-app.get("/", async (req, res) => {
-    console.log("start");
-    const result = await pool.query("SELECT current_database()");
-    console.log("end");
+// app.get("/", async (req, res) => {
+//     console.log("start");
+//     const result = await pool.query("SELECT current_database()");
+//     console.log("end");
 
-    res.send(
-        `The database name is : ${result.rows[0].current_database}`
-    );
-});
+//     res.send(
+//         `The database name is : ${result.rows[0].current_database}`
+//     );
+// });
 
 // Disconnect from Database
 process.on("unhandledRejection", async (err) => {
