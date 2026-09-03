@@ -80,6 +80,14 @@ router.post("/:groupKey/:masterKey/import", upload.single("file"), async (req, r
             format
         );
 
+        if (result.failed.length > 0) {
+            return res.status(400).json({
+                status: 400,
+                message: "Import failed due to invalid data",
+                data: result,
+            });
+        }
+
         return res.status(200).json({
             status: 200,
             message: "Import completed",
@@ -89,6 +97,13 @@ router.post("/:groupKey/:masterKey/import", upload.single("file"), async (req, r
         if (error.statusCode === 404) {
             return res.status(404).json({
                 status: 404,
+                message: error.message,
+                data: null,
+            });
+        }
+        if (error.statusCode === 400) {
+            return res.status(400).json({
+                status: 400,
                 message: error.message,
                 data: null,
             });
