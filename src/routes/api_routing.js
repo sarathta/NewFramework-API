@@ -18,6 +18,7 @@ const vendorMaterialsController = require('../controllers/vendorMaterialsControl
 const systemParameetrsController = require('../controllers/systemParametersController');
 const companySettingsController = require('../controllers/companySettingsController');
 const grnController = require('../controllers/grnController');
+const rulesController = require('../controllers/rulesController');
 
 // Mount all routes
 router.use('/auth', authController);
@@ -36,5 +37,6 @@ router.use('/system-parameters', systemParameetrsController);
 router.use('/company-settings', companySettingsController);
 router.use('/grn', grnController);
 router.use('/grns', grnController);
+router.use('/rules', rulesController);
 
 module.exports = router;

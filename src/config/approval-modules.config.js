@@ -11,15 +11,19 @@ const APPROVAL_MODULE_GRN = "GRN";
 const APPROVAL_MODULES = {
     [APPROVAL_MODULE_INDENT]: {
         valueMode: "totalPrice",
+        zenModuleName: "Indent",
     },
     [APPROVAL_MODULE_MATERIAL_ISSUE]: {
         valueMode: "totalQuantity",
+        zenModuleName: "Material Issue",
     },
     [APPROVAL_MODULE_PURCHASE_ORDER]: {
         valueMode: "totalAmount",
+        zenModuleName: "Purchase Order",
     },
     [APPROVAL_MODULE_GRN]: {
         valueMode: "totalQuantity",
+        zenModuleName: "GRN",
     },
 };
 

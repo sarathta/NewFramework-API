@@ -1,4 +1,6 @@
-const { prisma } = require("../config/db");
+const fs = require("fs");
+const path = require("path");
+const { ZenEngine } = require("@gorules/zen-engine");
 const {
     ROLE_L1_APPROVER,
     ROLE_L2_APPROVER,
@@ -8,6 +10,16 @@ const { APPROVAL_MODULES } = require("../config/approval-modules.config");
 const CREATED_BY_ROLE_USER = "USER";
 const CREATED_BY_ROLE_L1 = "L1";
 const CREATED_BY_ROLE_L2 = "L2";
+
+const PO_MODULE_RULES_PATH = path.join(
+    __dirname,
+    "..",
+    "..",
+    "rules",
+    "po_module_rules.json"
+);
+
+let cachedDecision;
 
 function resolveCreatedByRole(roleId) {
     const numericRoleId = Number(roleId);
@@ -35,6 +47,15 @@ function calculateTotalPrice(items = []) {
     }, 0);
 }
 
+function resolveZenModuleName(module) {
+    const moduleConfig = APPROVAL_MODULES[module];
+    if (moduleConfig?.zenModuleName) {
+        return moduleConfig.zenModuleName;
+    }
+
+    return String(module ?? "").trim();
+}
+
 function resolveModuleTotalValue(module, items, totalAmount) {
     const moduleConfig = APPROVAL_MODULES[module];
     const valueMode = moduleConfig?.valueMode;
@@ -55,13 +76,18 @@ function buildEvaluationContext({ module, roleId, departmentId, items, totalAmou
     const totalPrice = calculateTotalPrice(items);
     const resolvedTotalAmount = Number(totalAmount ?? totalPrice);
     const totalValue = resolveModuleTotalValue(module, items, resolvedTotalAmount);
+    const createdByRole = resolveCreatedByRole(roleId);
+    const zenModuleName = resolveZenModuleName(module);
 
     return {
-        createdByRole: resolveCreatedByRole(roleId),
+        module: zenModuleName,
+        createdby: createdByRole,
+        createdByRole,
         departmentId:
             departmentId !== undefined && departmentId !== null && departmentId !== ""
                 ? Number(departmentId)
                 : null,
+        totalvalue: totalValue,
         totalValue,
         totalQuantity,
         totalPrice,
@@ -69,87 +95,43 @@ function buildEvaluationContext({ module, roleId, departmentId, items, totalAmou
     };
 }
 
-function normalizeOperator(operator) {
-    return String(operator ?? "=").trim();
+function getZenDecision() {
+    if (cachedDecision) {
+        return cachedDecision;
+    }
+
+    const content = fs.readFileSync(PO_MODULE_RULES_PATH);
+    const engine = new ZenEngine();
+    cachedDecision = engine.createDecision(content);
+    return cachedDecision;
 }
 
-function compareValues(actual, expected, operator) {
-    const op = normalizeOperator(operator);
-
-    if (op === "=" || op === "==") {
-        return String(actual) === String(expected);
-    }
-
-    if (op === "!=" || op === "<>") {
-        return String(actual) !== String(expected);
-    }
-
-    const actualNumber = Number(actual);
-    const expectedNumber = Number(expected);
-
-    if (Number.isNaN(actualNumber) || Number.isNaN(expectedNumber)) {
-        return false;
-    }
-
-    switch (op) {
-        case ">":
-            return actualNumber > expectedNumber;
-        case ">=":
-            return actualNumber >= expectedNumber;
-        case "<":
-            return actualNumber < expectedNumber;
-        case "<=":
-            return actualNumber <= expectedNumber;
-        default:
-            return false;
-    }
+function invalidateZenDecisionCache() {
+    cachedDecision = null;
 }
 
-function getContextFieldValue(field, context) {
-    switch (field) {
-        case "createdByRole":
-            return context.createdByRole;
-        case "departmentId":
-            return context.departmentId;
-        case "totalValue":
-            return context.totalValue;
-        case "totalQuantity":
-            return context.totalQuantity;
-        case "totalPrice":
-            return context.totalPrice;
-        case "totalAmount":
-            return context.totalAmount;
-        default:
-            return context[field];
-    }
-}
-
-function evaluateCondition(condition, context) {
-    if (!condition || typeof condition !== "object") {
-        return false;
+function normalizeApprovalLevels(approval) {
+    if (approval == null || approval === "") {
+        return [];
     }
 
-    const actualValue = getContextFieldValue(condition.field, context);
-    return compareValues(actualValue, condition.value, condition.operator);
+    const values = Array.isArray(approval) ? approval : [approval];
+
+    return values
+        .map((level) => String(level ?? "").trim().toUpperCase())
+        .filter(Boolean);
 }
 
-function evaluateRuleConditions(conditions, context) {
-    if (!Array.isArray(conditions) || conditions.length === 0) {
-        return true;
-    }
-
-    return conditions.every((condition) => evaluateCondition(condition, context));
-}
-
-function mapApprovalLevelsToRequirements(approvalLevels = []) {
-    const levels = Array.isArray(approvalLevels) ? approvalLevels : [];
-    const roles = new Set(levels.map((level) => String(level.role ?? "").toUpperCase()));
+function mapApprovalLevelsToRequirements(approval) {
+    const roles = new Set(normalizeApprovalLevels(approval));
+    const approvalLevels = [...roles].map((role) => ({ role }));
 
     return {
         l1ApprovalRequired: roles.has("L1"),
         l2ApprovalRequired: roles.has("L2"),
         matchedRule: true,
-        approvalLevels: levels,
+        approval,
+        approvalLevels,
     };
 }
 
@@ -159,18 +141,9 @@ function getDefaultApprovalRequirements() {
         l2ApprovalRequired: false,
         matchedRule: false,
         hasEnabledRules: false,
+        approval: null,
         approvalLevels: [],
     };
-}
-
-async function getEnabledRulesForModule(module) {
-    return prisma.txn_approval_rules.findMany({
-        where: {
-            module,
-            enabled: true,
-        },
-        orderBy: [{ priority: "asc" }, { id: "asc" }],
-    });
 }
 
 async function evaluateApprovalRequirements({
@@ -188,43 +161,39 @@ async function evaluateApprovalRequirements({
         totalAmount,
     });
 
-    const rules = await getEnabledRulesForModule(module);
-    const hasEnabledRules = rules.length > 0;
+    const decision = getZenDecision();
+    const response = await decision.evaluate({
+        module: context.module,
+        createdby: context.createdby,
+        totalvalue: context.totalvalue,
+    });
+    const result = response?.result;
 
-    for (const rule of rules) {
-        const conditions = Array.isArray(rule.conditions) ? rule.conditions : [];
-
-        if (!evaluateRuleConditions(conditions, context)) {
-            continue;
-        }
-
-        const actions =
-            typeof rule.actions === "object" && rule.actions !== null ? rule.actions : {};
-
+    if (!result || result.enabled !== true) {
         return {
-            ...mapApprovalLevelsToRequirements(actions.approvalLevels),
-            hasEnabledRules,
-            matchedRuleId: Number(rule.id),
-            matchedRuleName: rule.rule_name,
+            ...getDefaultApprovalRequirements(),
             context,
+            zenResult: result ?? null,
         };
     }
 
     return {
-        ...getDefaultApprovalRequirements(),
-        hasEnabledRules,
+        ...mapApprovalLevelsToRequirements(result.approval),
+        hasEnabledRules: true,
+        matchedRuleName: "po_module_rules",
         context,
+        zenResult: result,
     };
 }
 
 module.exports = {
+    PO_MODULE_RULES_PATH,
     resolveCreatedByRole,
     calculateTotalQuantity,
     calculateTotalPrice,
     buildEvaluationContext,
-    evaluateCondition,
-    evaluateRuleConditions,
     evaluateApprovalRequirements,
+    invalidateZenDecisionCache,
     CREATED_BY_ROLE_USER,
     CREATED_BY_ROLE_L1,
     CREATED_BY_ROLE_L2,
